@@ -393,9 +393,9 @@ export function AppSidebar({
 
   return (
     <DndProvider backend={HTML5Backend}>
-      <aside className="flex h-full min-h-0 flex-col border-r border-stone-200 bg-[#f7f5ef]">
+      <aside className="flex h-full min-h-0 min-w-0 flex-col border-r border-stone-200 bg-[#f7f5ef]">
         <div className="border-b border-stone-200 px-3 py-3">
-          <div className="rounded-2xl border border-stone-200 bg-white/90 p-4 shadow-sm">
+          <div className="min-w-0 rounded-2xl border border-stone-200 bg-white/90 p-4 shadow-sm">
             <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-500">
               Active identity
             </p>
@@ -428,8 +428,8 @@ export function AppSidebar({
           </div>
         </div>
 
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="space-y-3 px-3 py-3">
+        <ScrollArea className="min-h-0 min-w-0 flex-1">
+          <div className="min-w-0 space-y-3 px-3 py-3">
             {workspaceTrees.map(({ workspace, pages }) => {
               const workspaceKey = getWorkspaceExpansionKey(workspace.id);
               const isExpanded = expandedKeys[workspaceKey] ?? true;
@@ -440,8 +440,8 @@ export function AppSidebar({
                   onOpenChange={(open) => setExpanded(workspaceKey, open)}
                   open={isExpanded}
                 >
-                  <section className="rounded-2xl border border-stone-200 bg-white/90 p-2 shadow-sm">
-                    <div className="flex items-center gap-2 px-1 py-1">
+                  <section className="w-full min-w-0 rounded-2xl border border-stone-200 bg-white/90 p-2 shadow-sm">
+                    <div className="flex min-w-0 items-center gap-2 px-1 py-1">
                       <CollapsibleTrigger asChild>
                         <button
                           className="inline-flex h-7 w-7 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-100 hover:text-stone-900"
@@ -454,7 +454,7 @@ export function AppSidebar({
                           )}
                         </button>
                       </CollapsibleTrigger>
-                      <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-stone-100 text-stone-700">
+                      <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-stone-100 text-stone-700">
                         {workspace.type === "private" ? (
                           <Lock className="h-4 w-4" />
                         ) : (
@@ -470,7 +470,7 @@ export function AppSidebar({
                         </p>
                       </div>
                       <Button
-                        className="h-8 w-8 rounded-lg"
+                        className="h-8 w-8 shrink-0 rounded-lg"
                         onClick={() =>
                           void handleCreatePage({
                             workspaceId: workspace.id,
@@ -508,7 +508,7 @@ export function AppSidebar({
                         }
                         workspaceId={workspace.id}
                       />
-                      <div className="space-y-0.5">
+                      <div className="min-w-0 space-y-0.5">
                         {pages.length === 0 ? (
                           <p className="px-3 py-2 text-sm text-stone-500">
                             No visible pages for this user.
@@ -691,10 +691,10 @@ function SidebarPageNode({
       onOpenChange={(open) => setExpanded(getPageExpansionKey(node.id), open)}
       open={hasChildren ? isExpanded : true}
     >
-      <div className="space-y-0.5">
+      <div className="min-w-0 space-y-0.5">
         <div
           className={cn(
-            "relative rounded-xl",
+            "relative w-full min-w-0 rounded-xl",
             activeDropPosition === "before" && "before:absolute before:inset-x-2 before:top-0 before:h-0.5 before:rounded-full before:bg-stone-900",
             activeDropPosition === "after" && "after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-stone-900",
             activeDropPosition === "inside" && "bg-stone-100/80",
@@ -703,13 +703,13 @@ function SidebarPageNode({
         >
           <div
             className={cn(
-              "group flex items-center gap-1 rounded-xl pr-1 transition",
+              "group flex w-full min-w-0 items-center gap-1 rounded-xl pr-1 transition",
               isSelected ? "bg-stone-900 text-white" : "text-stone-700 hover:bg-stone-100",
               isDragging && "opacity-50",
             )}
             style={{ paddingLeft: `${8 + depth * 14}px` }}
           >
-            <div className="flex items-center gap-0.5">
+            <div className="flex shrink-0 items-center gap-0.5">
               {hasChildren ? (
                 <CollapsibleTrigger asChild>
                   <button
@@ -761,7 +761,7 @@ function SidebarPageNode({
 
             <span
               className={cn(
-                "hidden rounded-full px-2 py-1 text-[10px] font-medium uppercase tracking-[0.18em] sm:inline-flex",
+                "hidden shrink-0 rounded-full px-2 py-1 text-[10px] font-medium uppercase tracking-[0.18em] xl:inline-flex",
                 isSelected ? "bg-white/10 text-stone-200" : "bg-stone-100 text-stone-500",
               )}
             >
