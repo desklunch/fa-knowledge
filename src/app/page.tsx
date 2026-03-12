@@ -17,6 +17,8 @@ import {
   PanelLeftOpen,
   Shield,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { ComponentType, ReactNode } from "react";
 
 type HomeProps = {
@@ -119,47 +121,78 @@ export default async function Home({ searchParams }: HomeProps) {
                     }
                   />
                 ) : (
-                  <article className="flex h-full min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white shadow-sm">
+                  <article className="flex m-4 h-full min-h-0 flex-col overflow-hidden rounded-lg max-w-4xl mx-auto border border-stone-200 bg-white shadow-sm">
                     <div className="shrink-0 border-b border-stone-200 px-6 py-4">
                       <div className="flex flex-wrap items-center justify-between gap-4">
                         <div className="min-w-0">
-                          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
-                            {currentWorkspace?.name ?? "Workspace"}
-                          </p>
+        
                           <h2 className="truncate text-2xl font-semibold tracking-tight text-stone-950">
                             {selectedPage.title}
                           </h2>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <StatusPill icon={Shield}>
-                            Read {selectedPage.effectiveReadLevel ?? "private"}
-                          </StatusPill>
-                          <StatusPill icon={Shield}>
-                            Write {selectedPage.effectiveWriteLevel ?? "private"}
-                          </StatusPill>
-                          <StatusPill icon={Clock3}>Revision {selectedRevision.revisionNumber}</StatusPill>
-                          <StatusPill icon={PanelLeftOpen}>Read only</StatusPill>
+                      
+                  
                         </div>
                       </div>
                     </div>
                     <div className="min-h-0 flex-1 overflow-y-auto px-8 py-8">
-                    <div className="mx-auto max-w-3xl space-y-3">
-                      {selectedRevision.contentMarkdown
-                        .split("\n")
-                        .map((line, index) =>
-                          line.startsWith("# ") ? (
-                            <h3 key={`${line}-${index}`} className="text-3xl font-semibold tracking-tight">
-                              {line.replace("# ", "")}
-                            </h3>
-                          ) : line ? (
-                            <p key={`${line}-${index}`} className="text-base leading-8 text-stone-700">
-                              {line}
-                            </p>
-                          ) : (
-                            <div key={`spacer-${index}`} className="h-2" />
-                          ),
-                        )}
-                    </div>
+                      <div className="mx-auto max-w-3xl">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            h1: ({ children }) => (
+                              <h1 className="mt-6 text-4xl font-semibold tracking-tight text-stone-950 first:mt-0">
+                                {children}
+                              </h1>
+                            ),
+                            h2: ({ children }) => (
+                              <h2 className="mt-6 text-3xl font-semibold tracking-tight text-stone-950 first:mt-0">
+                                {children}
+                              </h2>
+                            ),
+                            h3: ({ children }) => (
+                              <h3 className="mt-5 text-2xl font-semibold tracking-tight text-stone-950 first:mt-0">
+                                {children}
+                              </h3>
+                            ),
+                            p: ({ children }) => (
+                              <p className="mt-4 text-base leading-8 text-stone-700 first:mt-0">
+                                {children}
+                              </p>
+                            ),
+                            ul: ({ children }) => (
+                              <ul className="mt-4 list-disc space-y-2 pl-6 text-base leading-8 text-stone-700">
+                                {children}
+                              </ul>
+                            ),
+                            ol: ({ children }) => (
+                              <ol className="mt-4 list-decimal space-y-2 pl-6 text-base leading-8 text-stone-700">
+                                {children}
+                              </ol>
+                            ),
+                            blockquote: ({ children }) => (
+                              <blockquote className="mt-4 border-l-4 border-stone-300 pl-4 italic text-stone-600">
+                                {children}
+                              </blockquote>
+                            ),
+                            code: ({ children, className }) => {
+                              const isBlock = Boolean(className);
+
+                              return isBlock ? (
+                                <code className="block overflow-x-auto rounded-xl bg-stone-950 px-4 py-3 text-sm text-stone-100">
+                                  {children}
+                                </code>
+                              ) : (
+                                <code className="rounded bg-stone-100 px-1.5 py-0.5 text-sm text-stone-900">
+                                  {children}
+                                </code>
+                              );
+                            },
+                            pre: ({ children }) => <div className="mt-4">{children}</div>,
+                          }}
+                        >
+                          {selectedRevision.contentMarkdown}
+                        </ReactMarkdown>
+                      </div>
                     </div>
                   </article>
                 )}

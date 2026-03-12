@@ -149,7 +149,7 @@ export function PageMetadataForm({
 
 function buildLevelOptions(canInherit: boolean) {
   return [
-    ...(canInherit ? [{ value: "", label: "Inherit from parent" }] : []),
+    ...(canInherit ? [{ value: "", label: "Inherit" }] : []),
     { value: "1", label: "Level 1" },
     { value: "2", label: "Level 2" },
     { value: "3", label: "Level 3" },
