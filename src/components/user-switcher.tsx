@@ -12,6 +12,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+const IMPERSONATION_COOKIE = "fa_active_user";
+const IMPERSONATION_MAX_AGE = 60 * 60 * 24 * 30;
+
 type UserSwitcherProps = {
   currentUserId: string;
   selectedPageId: string | null;
@@ -49,20 +52,13 @@ export function UserSwitcher({
         <DropdownMenuSeparator />
         {users.map((user) => {
           const isActive = user.id === currentUserId;
-          const params = new URLSearchParams({
-            user: user.id,
-          });
-
-          if (selectedPageId) {
-            params.set("page", selectedPageId);
-          }
-
-          const href = `/impersonate?${params.toString()}`;
+          const href = selectedPageId ? `/?page=${selectedPageId}` : "/";
 
           return (
             <DropdownMenuItem
               key={user.id}
               onSelect={() => {
+                document.cookie = `${IMPERSONATION_COOKIE}=${encodeURIComponent(user.id)}; path=/; max-age=${IMPERSONATION_MAX_AGE}; samesite=lax`;
                 window.location.assign(href);
               }}
               className="flex items-center justify-between gap-3"

@@ -175,7 +175,7 @@ export function PageEditor({
           setContentMarkdown(nextContentMarkdown);
         }}
       >
-        <EditorContainer className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[1.75rem] border border-stone-200 bg-white shadow-[0_24px_80px_-48px_rgba(28,25,23,0.55)]">
+        <EditorContainer className="flex min-h-0 flex-1 flex-col overflow-hidden  bg-white shadow-[0_24px_80px_-48px_rgba(28,25,23,0.55)]">
           <Toolbar />
           <Editor
             className="min-h-0 flex-1 overflow-y-auto text-base leading-8 text-stone-800 [&_[data-slate-node='element']]:my-3 [&_[data-slate-node='text']]:leading-8 [&_blockquote]:border-l-4 [&_blockquote]:border-amber-300 [&_blockquote]:bg-amber-50/70 [&_blockquote]:px-5 [&_blockquote]:py-3 [&_blockquote]:italic [&_code]:rounded-md [&_code]:bg-stone-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_h1]:mt-8 [&_h1]:text-5xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h2]:mt-7 [&_h2]:text-3xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_h3]:mt-6 [&_h3]:text-2xl [&_h3]:font-semibold [&_li>p]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_pre]:overflow-x-auto [&_pre]:rounded-2xl [&_pre]:bg-stone-950 [&_pre]:p-5 [&_pre]:text-[0.95rem] [&_pre]:leading-7 [&_pre]:text-stone-100 [&_strong]:font-semibold [&_u]:decoration-2 [&_ul]:list-disc [&_ul]:pl-6"

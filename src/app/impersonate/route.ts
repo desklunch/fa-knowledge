@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { setImpersonatedUserId } from "@/lib/impersonation";
+import {
+  getImpersonationCookieOptions,
+  IMPERSONATION_COOKIE,
+} from "@/lib/impersonation";
 import { getAvailableUsers } from "@/lib/knowledge-base";
 
 export async function GET(request: Request) {
@@ -20,7 +23,12 @@ export async function GET(request: Request) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  await setImpersonatedUserId(userId);
+  const response = NextResponse.redirect(redirectUrl);
+  response.cookies.set(
+    IMPERSONATION_COOKIE,
+    userId,
+    getImpersonationCookieOptions(),
+  );
 
-  return NextResponse.redirect(redirectUrl);
+  return response;
 }

@@ -88,7 +88,7 @@ export default async function Home({ searchParams }: HomeProps) {
           visibleWorkspaces={visibleWorkspaces}
         />
 
-        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#fbfaf7]">
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#fbfaf7] border border-stone-200 border-4">
           {selectedPage && selectedRevision ? (
             <>
               {params.message ? (
@@ -103,7 +103,7 @@ export default async function Home({ searchParams }: HomeProps) {
                 </div>
               ) : null}
 
-              <div className="min-h-0 flex-1 px-5 py-4">
+              <div className="min-h-0 flex-1 ">
                 {selectedPage.canWrite ? (
                   <EditablePageForm
                     key={`form-${selectedPage.id}-${selectedRevision.id}`}

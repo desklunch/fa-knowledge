@@ -185,23 +185,23 @@ export function EditablePageForm({
 
   return (
     <form
-      className="flex h-full min-h-0 flex-col gap-4"
+      className="flex h-full min-h-0 flex-col"
       onSubmit={(event) => {
         event.preventDefault();
         void persistDraft("manual");
       }}
     >
-      <section className="shrink-0 rounded-[1.5rem] border border-stone-200 bg-white px-5 py-4 shadow-sm">
+      <section className="shrink-0 border border-b-1 border-stone-200 bg-white p-2">
         <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
+          {/* <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
             {workspaceName}
-          </p>
+          </p> */}
           <input
             name="title"
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Untitled"
-            className="mt-2 w-full border-0 bg-transparent p-0 text-3xl font-semibold tracking-tight text-stone-950 outline-none placeholder:text-stone-400"
+            className="w-full border-0 bg-transparent p-0 text-3xl font-semibold tracking-tight text-stone-950 outline-none placeholder:text-stone-400"
           />
         </div>
       </section>
@@ -212,7 +212,7 @@ export function EditablePageForm({
         onChange={handleEditorChange}
       />
 
-      <div className="shrink-0 flex flex-col gap-4 rounded-[1.5rem] border border-stone-200 bg-white px-5 py-4 md:flex-row md:items-center md:justify-between">
+      {/* <div className="shrink-0 flex flex-col gap-4 rounded-[1.5rem] border border-stone-200 bg-white px-5 py-4 md:flex-row md:items-center md:justify-between">
         <div className="space-y-1">
           <p className="text-sm font-medium text-stone-800">
             Every save writes a new immutable revision snapshot.
@@ -239,7 +239,7 @@ export function EditablePageForm({
           </span>
           <SaveButton isDirty={isDirty} isSaving={saveState === "saving"} />
         </div>
-      </div>
+      </div> */}
     </form>
   );
 }
