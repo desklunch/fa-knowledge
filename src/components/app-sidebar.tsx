@@ -394,25 +394,15 @@ export function AppSidebar({
   return (
     <DndProvider backend={HTML5Backend}>
       <aside className="flex h-full min-h-0 min-w-0 flex-col border-r border-stone-200 bg-[#f7f5ef]">
-        <div className="border-b border-stone-200 px-3 py-3">
-          <div className="min-w-0 rounded-2xl border border-stone-200 bg-white/90 p-4 shadow-sm">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-stone-500">
-              Active identity
-            </p>
-            <div className="mt-3 flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-stone-950">{currentUser.name}</h2>
-                <p className="mt-1 text-sm text-stone-600">
+        <div className="border-b border-stone-200 ">
+          <div className="bg-white/90 px-3 py-3 ">
+          <div>
+                <h2 className="text-sm font-semibold text-stone-950">{currentUser.name}</h2>
+                <p className=" text-xs text-stone-600 uppercase">
                   Level {currentUser.permissionLevel} · {currentUser.userType}
                 </p>
               </div>
-              <span className="rounded-full bg-stone-100 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-stone-500">
-                rail
-              </span>
-            </div>
-            <p className="mt-3 text-xs leading-5 text-stone-500">
-              Notion-style workspace trees with inline actions and drag/drop hierarchy controls.
-            </p>
+  
             {status ? (
               <div
                 className={cn(
@@ -429,7 +419,7 @@ export function AppSidebar({
         </div>
 
         <ScrollArea className="min-h-0 min-w-0 flex-1">
-          <div className="min-w-0 space-y-3 px-3 py-3">
+          <div className="min-w-0 space-y-3 ">
             {workspaceTrees.map(({ workspace, pages }) => {
               const workspaceKey = getWorkspaceExpansionKey(workspace.id);
               const isExpanded = expandedKeys[workspaceKey] ?? true;
@@ -440,8 +430,8 @@ export function AppSidebar({
                   onOpenChange={(open) => setExpanded(workspaceKey, open)}
                   open={isExpanded}
                 >
-                  <section className="w-full min-w-0 rounded-2xl border border-stone-200 bg-white/90 p-2 shadow-sm">
-                    <div className="flex min-w-0 items-center gap-2 px-1 py-1">
+                  <section className="w-full min-w-0  bg-white/90 p-2 ">
+                    <div className="flex min-w-0 items-center gap-2 px-1 py-1 overflow-hidden">
                       <CollapsibleTrigger asChild>
                         <button
                           className="inline-flex h-7 w-7 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-100 hover:text-stone-900"
@@ -454,20 +444,20 @@ export function AppSidebar({
                           )}
                         </button>
                       </CollapsibleTrigger>
-                      <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-stone-100 text-stone-700">
+                      {/* <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-stone-100 text-stone-700">
                         {workspace.type === "private" ? (
                           <Lock className="h-4 w-4" />
                         ) : (
                           <Share2 className="h-4 w-4" />
                         )}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-[11px] font-semibold uppercase tracking-[0.22em] text-stone-500">
+                      </span> */}
+                      <div className="min-w-0 flex-1 overflow-hidden">
+                        <p className="truncate text-[11px] font-semibold uppercase text-stone-500">
                           {workspace.name}
                         </p>
-                        <p className="text-xs text-stone-400">
+                        {/* <p className="text-xs text-stone-400">
                           {pages.length} root {pages.length === 1 ? "page" : "pages"}
-                        </p>
+                        </p> */}
                       </div>
                       <Button
                         className="h-8 w-8 shrink-0 rounded-lg"
@@ -759,14 +749,14 @@ function SidebarPageNode({
               <span className="truncate block">{node.title}</span>
             </Link>
 
-            <span
+            {/* <span
               className={cn(
                 "hidden shrink-0 rounded-full px-2 py-1 text-[10px] font-medium uppercase tracking-[0.18em] xl:inline-flex",
                 isSelected ? "bg-white/10 text-stone-200" : "bg-stone-100 text-stone-500",
               )}
             >
               {node.canWrite ? "edit" : "read"}
-            </span>
+            </span> */}
 
             <PageActionMenu
               node={node}
