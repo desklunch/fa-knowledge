@@ -34,13 +34,11 @@ export function UserSwitcher({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="inline-flex min-w-[12rem] items-center justify-between gap-3 rounded-xl border border-stone-300 bg-white px-3 py-2 text-left shadow-sm transition hover:border-stone-400"
+          className="inline-flex w-auto items-center justify-end gap-3 border-l border-stone-300 bg-white px-3 py-4 text-left transition hover:border-stone-400"
         >
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-stone-900">{currentUser.name}</p>
-            <p className="truncate text-xs text-stone-500">
-              {formatUserType(currentUser.userType)} · Level {currentUser.permissionLevel}
-            </p>
+
           </div>
           <ChevronDown className="h-4 w-4 shrink-0 text-stone-500" />
         </button>
@@ -59,20 +57,23 @@ export function UserSwitcher({
             params.set("page", selectedPageId);
           }
 
+          const href = `/impersonate?${params.toString()}`;
+
           return (
-            <DropdownMenuItem key={user.id} asChild>
-              <a
-                href={`/impersonate?${params.toString()}`}
-                className="flex items-center justify-between gap-3"
-              >
-                <div className="min-w-0">
-                  <p className="truncate font-medium text-stone-900">{user.name}</p>
-                  <p className="truncate text-xs text-stone-500">
-                    {formatUserType(user.userType)} · Level {user.permissionLevel}
-                  </p>
-                </div>
-                {isActive ? <Check className="h-4 w-4 shrink-0 text-stone-900" /> : null}
-              </a>
+            <DropdownMenuItem
+              key={user.id}
+              onSelect={() => {
+                window.location.assign(href);
+              }}
+              className="flex items-center justify-between gap-3"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-medium text-stone-900">{user.name}</p>
+                <p className="truncate text-xs text-stone-500">
+                  {formatUserType(user.userType)} · Level {user.permissionLevel}
+                </p>
+              </div>
+              {isActive ? <Check className="h-4 w-4 shrink-0 text-stone-900" /> : null}
             </DropdownMenuItem>
           );
         })}

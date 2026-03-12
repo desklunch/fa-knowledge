@@ -53,18 +53,16 @@ export default async function Home({ searchParams }: HomeProps) {
   return (
     <main className="h-screen overflow-hidden bg-[#f3f1ea] text-stone-900">
       <header className="border-b border-stone-200 bg-white/95 backdrop-blur">
-        <div className="flex h-14 items-center justify-between gap-4 px-4">
+        <div className="flex h-14 items-center justify-between gap-4 px-2">
           <div className="flex items-center gap-3">
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-stone-950 text-white">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-stone-950 text-white">
               <LayoutDashboard className="h-4 w-4" />
             </span>
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
                 fa-knowledge-app
               </p>
-              <p className="text-sm font-medium text-stone-900">
-                Multi-user knowledge base workspace
-              </p>
+
             </div>
           </div>
 
@@ -181,7 +179,7 @@ export default async function Home({ searchParams }: HomeProps) {
           )}
         </section>
 
-        <aside className="min-h-0 overflow-y-auto border-l border-stone-200 bg-white">
+        <aside className="min-h-0 overflow-y-auto border-l border-stone-200 bg-[#f7f5ef]">
           {selectedPage && selectedRevision ? (
             <div>
               <SidebarPanel title="Page overview">
@@ -271,7 +269,7 @@ function SidebarPanel({
 }) {
   return (
     <Collapsible defaultOpen={defaultOpen}>
-      <section className="w-full border-b border-stone-200 bg-stone-50 last:border-b-0">
+      <section className="w-full border-b border-stone-200 bg-stone-50">
         <CollapsibleTrigger asChild>
           <button
             className="group flex w-full items-start justify-between gap-3 px-4 py-4 text-left transition hover:bg-stone-100"
