@@ -12,7 +12,7 @@ import {
   File,
   FilePlus2,
   FolderTree,
-  MoreHorizontal,
+  MoreVertical,
   Pencil,
   Plus,
   Settings2,
@@ -815,14 +815,15 @@ function PageActionMenu({
       <DropdownMenuTrigger asChild>
         <button
           className={cn(
-            "inline-flex h-8 w-8 items-center justify-center rounded-lg transition",
+            "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg opacity-0 transition focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100",
             selected
               ? "text-stone-200 hover:bg-white/10 hover:text-white"
               : "text-stone-400 hover:bg-stone-200/70 hover:text-stone-900",
+            selected && "opacity-100",
           )}
           type="button"
         >
-          <MoreHorizontal className="h-4 w-4" />
+          <MoreVertical className="h-4 w-4" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">

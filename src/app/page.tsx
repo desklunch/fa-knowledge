@@ -1,20 +1,21 @@
-import {
-  createPageAction,
-  deletePageAction,
-} from "@/app/actions";
+import { deletePageAction } from "@/app/actions";
 import { AppSidebar } from "@/components/app-sidebar";
 import { EditablePageForm } from "@/components/editable-page-form";
 import { UserSwitcher } from "@/components/user-switcher";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { getKnowledgeBaseView } from "@/lib/knowledge-base";
 import { getImpersonatedUserId } from "@/lib/impersonation";
 import {
   Clock3,
-  FilePlus2,
+  ChevronDown,
+  ChevronRight,
   LayoutDashboard,
   PanelLeftOpen,
-  RefreshCw,
   Shield,
-  Sparkles,
 } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
 
@@ -33,7 +34,6 @@ export default async function Home({ searchParams }: HomeProps) {
     availableUsers,
     currentUser,
     selectedPage,
-    selectedPageId,
     selectedPageRevisions,
     selectedRevision,
     visibleWorkspaces,
@@ -50,14 +50,6 @@ export default async function Home({ searchParams }: HomeProps) {
     ? visibleWorkspaces.find(({ workspace }) => workspace.id === selectedPage.workspaceId)?.workspace ??
       null
     : null;
-  const privateWorkspace = visibleWorkspaces.find(
-    ({ workspace }) =>
-      workspace.type === "private" && workspace.ownerUserId === currentUser.id,
-  )?.workspace;
-  const sharedWorkspace = visibleWorkspaces.find(
-    ({ workspace }) => workspace.type === "shared",
-  )?.workspace;
-
   return (
     <main className="h-screen overflow-hidden bg-[#f3f1ea] text-stone-900">
       <header className="border-b border-stone-200 bg-white/95 backdrop-blur">
@@ -76,34 +68,10 @@ export default async function Home({ searchParams }: HomeProps) {
             </div>
           </div>
 
-          <div className="hidden items-center gap-2 lg:flex">
-            <HeaderButton icon={RefreshCw} label="Refresh" href={selectedPageId ? `/?page=${selectedPageId}` : "/"} />
-            {privateWorkspace ? (
-              <RootCreateButton
-                icon={FilePlus2}
-                label="Private root"
-                workspaceId={privateWorkspace.id}
-                title="Quick private note"
-                content="# Quick private note\n\nCreated from the global header."
-              />
-            ) : null}
-            {sharedWorkspace ? (
-              <RootCreateButton
-                icon={Sparkles}
-                label="Shared root"
-                workspaceId={sharedWorkspace.id}
-                title={`Shared note L${currentUser.permissionLevel}`}
-                content="# Shared note\n\nCreated from the global header."
-                explicitReadLevel={currentUser.permissionLevel}
-                explicitWriteLevel={currentUser.permissionLevel}
-              />
-            ) : null}
-          </div>
-
           <div className="min-w-0">
             <UserSwitcher
               currentUserId={currentUser.id}
-              selectedPageId={selectedPageId}
+              selectedPageId={selectedPage?.id ?? null}
               users={availableUsers}
             />
           </div>
@@ -118,7 +86,7 @@ export default async function Home({ searchParams }: HomeProps) {
             permissionLevel: currentUser.permissionLevel,
             userType: currentUser.userType,
           }}
-          selectedPageId={selectedPageId}
+          selectedPageId={selectedPage?.id ?? null}
           visibleWorkspaces={visibleWorkspaces}
         />
 
@@ -142,9 +110,6 @@ export default async function Home({ searchParams }: HomeProps) {
                   <EditablePageForm
                     key={`form-${selectedPage.id}-${selectedRevision.id}`}
                     currentRevisionId={selectedRevision.id}
-                    currentRevisionNumber={selectedRevision.revisionNumber}
-                    effectiveReadLevel={selectedPage.effectiveReadLevel}
-                    effectiveWriteLevel={selectedPage.effectiveWriteLevel}
                     pageId={selectedPage.id}
                     initialTitle={selectedPage.title}
                     initialEditorDocJson={selectedRevision.editorDocJson}
@@ -216,24 +181,30 @@ export default async function Home({ searchParams }: HomeProps) {
           )}
         </section>
 
-        <aside className="min-h-0 overflow-y-auto border-l border-stone-200 bg-white p-4">
+        <aside className="min-h-0 overflow-y-auto border-l border-stone-200 bg-white">
           {selectedPage && selectedRevision ? (
-            <div className="space-y-4">
-              <SidebarPanel
-                title="Page overview"
-                body={`${selectedPage.canWrite ? "Writable" : "Read only"} page in ${currentWorkspace?.name ?? "workspace"}.`}
-              >
+            <div>
+              <SidebarPanel title="Page overview">
                 <div className="grid gap-2 text-sm text-stone-600">
+                  <InlineMetric label="Title" value={selectedPage.title} />
                   <InlineMetric label="Current revision" value={String(selectedRevision.revisionNumber)} />
                   <InlineMetric label="Visible revisions" value={String(selectedPageRevisions.length)} />
                   <InlineMetric label="Read level" value={String(selectedPage.effectiveReadLevel ?? "private")} />
                   <InlineMetric label="Write level" value={String(selectedPage.effectiveWriteLevel ?? "private")} />
+                  <InlineMetric
+                    label="Reading time"
+                    value={`${Math.max(1, Math.ceil(getReadingWords(selectedRevision.contentMarkdown) / 220))} min`}
+                  />
+                  <InlineMetric
+                    label="Save behavior"
+                    value={selectedPage.canWrite ? "Autosave + manual save" : "Read only"}
+                  />
                 </div>
               </SidebarPanel>
 
               {selectedPage.canWrite ? (
                 <>
-                  <SidebarPanel title="Danger zone" body="Deleting a page removes its subtree and all revisions.">
+                  <SidebarPanel title="Danger zone">
                     <form action={deletePageAction}>
                       <input type="hidden" name="pageId" value={selectedPage.id} />
                       <button type="submit" className="w-full rounded-xl bg-red-700 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-red-800">
@@ -244,7 +215,7 @@ export default async function Home({ searchParams }: HomeProps) {
                 </>
               ) : null}
 
-              <SidebarPanel title="Recent revisions" body="Newest snapshots are listed first.">
+              <SidebarPanel title="Recent revisions">
                 <div className="space-y-2">
                   {selectedPageRevisions.slice(0, 6).map((revision) => (
                     <div key={revision.id} className="rounded-xl bg-stone-50 px-3 py-3 text-sm">
@@ -261,10 +232,7 @@ export default async function Home({ searchParams }: HomeProps) {
               </SidebarPanel>
             </div>
           ) : (
-            <SidebarPanel
-              title="Workspace status"
-              body={`Available identities: ${availableUsers.map((user) => user.name).join(" · ")}`}
-            >
+            <SidebarPanel title="Workspace status">
               <div className="space-y-2 text-sm text-stone-600">
                 <p>Private and shared spaces are both active in this session.</p>
                 <p>Use the left rail to create new root pages and inspect visibility boundaries.</p>
@@ -274,72 +242,6 @@ export default async function Home({ searchParams }: HomeProps) {
         </aside>
       </div>
     </main>
-  );
-}
-
-function HeaderButton({
-  href,
-  icon: Icon,
-  label,
-  muted = false,
-}: {
-  href?: string;
-  icon: ComponentType<{ className?: string }>;
-  label: string;
-  muted?: boolean;
-}) {
-  return (
-    <a
-      href={href ?? "#"}
-      className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
-        muted
-          ? "border-stone-200 bg-white text-stone-500 hover:border-stone-300 hover:text-stone-900"
-          : "border-stone-300 bg-stone-950 text-white hover:bg-stone-800"
-      }`}
-    >
-      <Icon className="h-3.5 w-3.5" />
-      <span>{label}</span>
-    </a>
-  );
-}
-
-function RootCreateButton({
-  content,
-  explicitReadLevel,
-  explicitWriteLevel,
-  icon: Icon,
-  label,
-  title,
-  workspaceId,
-}: {
-  content: string;
-  explicitReadLevel?: number;
-  explicitWriteLevel?: number;
-  icon: ComponentType<{ className?: string }>;
-  label: string;
-  title: string;
-  workspaceId: string;
-}) {
-  return (
-    <form action={createPageAction}>
-      <input type="hidden" name="workspaceId" value={workspaceId} />
-      <input type="hidden" name="parentPageId" value="" />
-      <input type="hidden" name="title" value={title} />
-      <input type="hidden" name="contentMarkdown" value={content} />
-      {typeof explicitReadLevel === "number" ? (
-        <input type="hidden" name="explicitReadLevel" value={String(explicitReadLevel)} />
-      ) : null}
-      {typeof explicitWriteLevel === "number" ? (
-        <input type="hidden" name="explicitWriteLevel" value={String(explicitWriteLevel)} />
-      ) : null}
-      <button
-        type="submit"
-        className="inline-flex items-center gap-2 rounded-lg border border-stone-300 bg-stone-950 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-800"
-      >
-        <Icon className="h-3.5 w-3.5" />
-        <span>{label}</span>
-      </button>
-    </form>
   );
 }
 
@@ -359,20 +261,36 @@ function StatusPill({
 }
 
 function SidebarPanel({
-  body,
   children,
   title,
+  defaultOpen = true,
 }: {
-  body: string;
   children: ReactNode;
   title: string;
+  defaultOpen?: boolean;
 }) {
   return (
-    <section className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
-      <h3 className="text-sm font-semibold text-stone-900">{title}</h3>
-      <p className="mt-1 text-sm leading-6 text-stone-600">{body}</p>
-      <div className="mt-4">{children}</div>
-    </section>
+    <Collapsible defaultOpen={defaultOpen}>
+      <section className="w-full border-b border-stone-200 bg-stone-50 last:border-b-0">
+        <CollapsibleTrigger asChild>
+          <button
+            className="group flex w-full items-start justify-between gap-3 px-4 py-4 text-left transition hover:bg-stone-100"
+            type="button"
+          >
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-stone-900">{title}</h3>
+            </div>
+            <span className="mt-0.5 shrink-0 text-stone-400">
+              <ChevronDown className="h-4 w-4 group-data-[state=closed]:hidden" />
+              <ChevronRight className="hidden h-4 w-4 group-data-[state=closed]:block" />
+            </span>
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="px-4 pb-4">
+          {children}
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
   );
 }
 
@@ -383,4 +301,14 @@ function InlineMetric({ label, value }: { label: string; value: string }) {
       <span className="font-medium text-stone-900">{value}</span>
     </div>
   );
+}
+
+function getReadingWords(value: string) {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return 0;
+  }
+
+  return normalized.split(/\s+/).length;
 }

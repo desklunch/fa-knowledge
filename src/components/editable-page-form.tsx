@@ -8,22 +8,16 @@ import { PageEditor } from "@/components/page-editor";
 type SaveState = "saved" | "saving" | "unsaved" | "error";
 
 type EditablePageFormProps = {
-  currentRevisionId: string;
-  currentRevisionNumber: number;
-  effectiveReadLevel: number | null;
-  effectiveWriteLevel: number | null;
   initialEditorDocJson: unknown;
   initialMarkdown: string;
   initialTitle: string;
+  currentRevisionId: string;
   pageId: string;
   workspaceName: string;
 };
 
 export function EditablePageForm({
   currentRevisionId,
-  currentRevisionNumber,
-  effectiveReadLevel,
-  effectiveWriteLevel,
   initialEditorDocJson,
   initialMarkdown,
   initialTitle,
@@ -45,16 +39,12 @@ export function EditablePageForm({
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
-  const [revisionNumber, setRevisionNumber] = useState(currentRevisionNumber);
   const [revisionId, setRevisionId] = useState(currentRevisionId);
 
   const isDirty =
     title !== savedTitle ||
     contentMarkdown !== savedContentMarkdown ||
     editorDocJson !== savedEditorDocJson;
-
-  const wordCount = countWords(contentMarkdown);
-  const readingMinutes = Math.max(1, Math.ceil(wordCount / 220));
 
   const persistDraft = useCallback(
     async (reason: "autosave" | "manual") => {
@@ -103,7 +93,6 @@ export function EditablePageForm({
         setSavedContentMarkdown(contentMarkdown);
         setSavedEditorDocJson(editorDocJson);
         setRevisionId(payload.page.currentRevisionId);
-        setRevisionNumber(payload.revision.revisionNumber);
         setLastSavedAt(new Date());
         setSaveState("saved");
 
@@ -203,28 +192,17 @@ export function EditablePageForm({
       }}
     >
       <section className="shrink-0 rounded-[1.5rem] border border-stone-200 bg-white px-5 py-4 shadow-sm">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
-              {workspaceName}
-            </p>
-            <input
-              name="title"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="Untitled"
-              className="mt-2 w-full border-0 bg-transparent p-0 text-3xl font-semibold tracking-tight text-stone-950 outline-none placeholder:text-stone-400"
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <HeaderPill label={`Read ${effectiveReadLevel ?? "private"}`} />
-            <HeaderPill label={`Write ${effectiveWriteLevel ?? "private"}`} />
-            <HeaderPill label={`Revision ${revisionNumber}`} />
-            <HeaderPill label={`${wordCount} words`} />
-            <HeaderPill label={`${readingMinutes} min read`} />
-            <HeaderPill label={getSaveLabel(saveState, lastSavedAt)} />
-          </div>
+        <div className="min-w-0">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
+            {workspaceName}
+          </p>
+          <input
+            name="title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Untitled"
+            className="mt-2 w-full border-0 bg-transparent p-0 text-3xl font-semibold tracking-tight text-stone-950 outline-none placeholder:text-stone-400"
+          />
         </div>
       </section>
 
@@ -266,14 +244,6 @@ export function EditablePageForm({
   );
 }
 
-function HeaderPill({ label }: { label: string }) {
-  return (
-    <span className="rounded-full bg-stone-100 px-3 py-1.5 text-xs font-medium text-stone-600">
-      {label}
-    </span>
-  );
-}
-
 function SaveButton({
   isDirty,
   isSaving,
@@ -294,16 +264,6 @@ function SaveButton({
       {isSaving ? "Saving..." : "Save page"}
     </button>
   );
-}
-
-function countWords(value: string) {
-  const normalized = value.trim();
-
-  if (!normalized) {
-    return 0;
-  }
-
-  return normalized.split(/\s+/).length;
 }
 
 function stringifyEditorDocJson(value: unknown) {
@@ -331,24 +291,4 @@ function formatTime(value: Date) {
     hour: "numeric",
     minute: "2-digit",
   }).format(value);
-}
-
-function getSaveLabel(state: SaveState, lastSavedAt: Date | null) {
-  if (state === "saving") {
-    return "Saving...";
-  }
-
-  if (state === "unsaved") {
-    return "Unsaved changes";
-  }
-
-  if (state === "error") {
-    return "Save failed";
-  }
-
-  if (lastSavedAt) {
-    return `Saved ${formatTime(lastSavedAt)}`;
-  }
-
-  return "Saved";
 }
