@@ -311,17 +311,21 @@ function Toolbar() {
           <ListButton label="Numbered list" nodeType="decimal">
             <ListOrdered className="h-4 w-4" />
           </ListButton>
-          <ToolbarButton label="Link" onClick={() => promptForLink(editor)}>
+          <ToolbarButton
+            label="Link"
+            onMouseDown={(event) => {
+              event.preventDefault();
+              promptForLink(editor);
+            }}
+          >
             <Link2 className="h-4 w-4" />
           </ToolbarButton>
           <ToolbarButton
             label="Horizontal rule"
-            onClick={() =>
-              editor.tf.insertNodes({
-                type: HorizontalRulePlugin.key,
-                children: [{ text: "" }],
-              })
-            }
+            onMouseDown={(event) => {
+              event.preventDefault();
+              insertHorizontalRule(editor);
+            }}
           >
             <SeparatorHorizontal className="h-4 w-4" />
           </ToolbarButton>
@@ -353,10 +357,37 @@ function promptForLink(editor: ReturnType<typeof useEditorRef>) {
     return;
   }
 
+  editor.tf.focus();
   upsertLink(editor, {
     text: editor.api.string(editor.selection) || url,
-    url,
+    url: normalizeUrl(url),
   });
+}
+
+function insertHorizontalRule(editor: ReturnType<typeof useEditorRef>) {
+  editor.tf.focus();
+  editor.tf.insertNodes({
+    type: HorizontalRulePlugin.key,
+    children: [{ text: "" }],
+  });
+}
+
+function normalizeUrl(url: string) {
+  const trimmedUrl = url.trim();
+
+  if (!trimmedUrl) {
+    return "";
+  }
+
+  if (
+    trimmedUrl.startsWith("/") ||
+    trimmedUrl.startsWith("#") ||
+    /^[a-z]+:/i.test(trimmedUrl)
+  ) {
+    return trimmedUrl;
+  }
+
+  return `https://${trimmedUrl}`;
 }
 
 function ToolbarGroup({
@@ -402,7 +433,7 @@ function ToolbarButton({
 }: {
   children: ReactNode;
   label: string;
-  onClick: () => void;
+  onClick?: () => void;
   onMouseDown?: (event: React.MouseEvent<HTMLButtonElement>) => void;
   pressed?: boolean;
 }) {
