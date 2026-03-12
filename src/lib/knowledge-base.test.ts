@@ -10,6 +10,7 @@ import {
   movePage,
   resetFallbackKnowledgeBase,
   savePage,
+  updatePageMetadata,
 } from "@/lib/knowledge-base";
 
 function flattenVisibleIds(pages: Awaited<ReturnType<typeof getKnowledgeBaseView>>["visibleWorkspaces"][number]["pages"]) {
@@ -71,6 +72,76 @@ test("authorized saves create a new revision and advance currentRevisionId", asy
   assert.equal(revisions[0]?.revisionNumber, 2);
 });
 
+test("autosave creates one revision per editor session and reopens latest draft", async () => {
+  resetFallbackKnowledgeBase();
+
+  const firstAutosave = await savePage({
+    actingUserId: seededUsers[0].id,
+    pageId: "30000000-0000-4000-8000-000000000001",
+    title: "Daily briefing autosave",
+    contentMarkdown: "# Daily briefing autosave\n\nFirst autosave.",
+    currentRevisionId: "40000000-0000-4000-8000-000000000001",
+    editorSessionId: "session-a",
+    saveMode: "autosave",
+  });
+
+  const secondAutosave = await savePage({
+    actingUserId: seededUsers[0].id,
+    pageId: "30000000-0000-4000-8000-000000000001",
+    title: "Daily briefing autosave draft",
+    contentMarkdown: "# Daily briefing autosave draft\n\nSecond autosave.",
+    currentRevisionId: firstAutosave.page.currentRevisionId,
+    editorSessionId: "session-a",
+    saveMode: "autosave",
+  });
+
+  const revisions = await getPageRevisions({
+    actingUserId: seededUsers[0].id,
+    pageId: "30000000-0000-4000-8000-000000000001",
+  });
+  const view = await getKnowledgeBaseView({
+    userId: seededUsers[0].id,
+    pageId: "30000000-0000-4000-8000-000000000001",
+  });
+
+  assert.equal(firstAutosave.revision.revisionNumber, 2);
+  assert.equal(secondAutosave.revision.revisionNumber, 2);
+  assert.equal(revisions[0]?.revisionNumber, 2);
+  assert.equal(view.selectedDraft?.title, "Daily briefing autosave draft");
+  assert.equal(
+    view.selectedDraft?.contentMarkdown,
+    "# Daily briefing autosave draft\n\nSecond autosave.",
+  );
+});
+
+test("stale revision saves are rejected", async () => {
+  resetFallbackKnowledgeBase();
+
+  const initialView = await getKnowledgeBaseView({
+    userId: seededUsers[0].id,
+    pageId: "30000000-0000-4000-8000-000000000001",
+  });
+
+  await savePage({
+    actingUserId: seededUsers[0].id,
+    pageId: "30000000-0000-4000-8000-000000000001",
+    title: "Daily briefing v2",
+    contentMarkdown: "# Daily briefing v2\n\nFresh notes.",
+    currentRevisionId: initialView.selectedRevision?.id ?? null,
+  });
+
+  await assert.rejects(
+    savePage({
+      actingUserId: seededUsers[0].id,
+      pageId: "30000000-0000-4000-8000-000000000001",
+      title: "Daily briefing stale",
+      contentMarkdown: "# Daily briefing stale\n\nOld draft.",
+      currentRevisionId: initialView.selectedRevision?.id ?? null,
+    }),
+    /newer revision/i,
+  );
+});
+
 test("creating a shared child under a restrictive parent inherits parent permissions", async () => {
   resetFallbackKnowledgeBase();
 
@@ -99,6 +170,34 @@ test("moving a page under a more restrictive parent recomputes subtree permissio
   assert.equal(result.page.parentPageId, "30000000-0000-4000-8000-000000000014");
   assert.equal(result.page.effectiveReadLevel, 3);
   assert.equal(result.page.effectiveWriteLevel, 3);
+});
+
+test("updating shared page metadata recomputes subtree permissions", async () => {
+  resetFallbackKnowledgeBase();
+
+  const result = await updatePageMetadata({
+    actingUserId: seededUsers[2].id,
+    pageId: "30000000-0000-4000-8000-000000000010",
+    explicitReadLevel: 2,
+    explicitWriteLevel: 3,
+  });
+
+  assert.equal(result.page.explicitReadLevel, 2);
+  assert.equal(result.page.explicitWriteLevel, 3);
+
+  const view = await getKnowledgeBaseView({
+    userId: seededUsers[2].id,
+    pageId: "30000000-0000-4000-8000-000000000011",
+  });
+  const operations = view.visibleWorkspaces
+    .find(({ workspace }) => workspace.id === "20000000-0000-4000-8000-000000000010")
+    ?.pages.find((page) => page.id === "30000000-0000-4000-8000-000000000010");
+  const runbooks = operations?.children.find(
+    (page) => page.id === "30000000-0000-4000-8000-000000000011",
+  );
+
+  assert.equal(runbooks?.effectiveReadLevel, 2);
+  assert.equal(runbooks?.effectiveWriteLevel, 3);
 });
 
 test("moving a page to a less restrictive parent is rejected when it weakens inherited restrictions", async () => {

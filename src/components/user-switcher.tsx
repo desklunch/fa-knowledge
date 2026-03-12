@@ -12,9 +12,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-const IMPERSONATION_COOKIE = "fa_active_user";
-const IMPERSONATION_MAX_AGE = 60 * 60 * 24 * 30;
-
 type UserSwitcherProps = {
   currentUserId: string;
   selectedPageId: string | null;
@@ -37,7 +34,7 @@ export function UserSwitcher({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="inline-flex w-auto items-center justify-end gap-3 border-l border-stone-300 bg-white px-3 py-4 text-left transition hover:border-stone-400"
+          className="inline-flex w-auto items-center justify-end gap-3 border-l border-stone-300 px-3 py-4 text-left transition"
         >
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-stone-900">{currentUser.name}</p>
@@ -52,15 +49,24 @@ export function UserSwitcher({
         <DropdownMenuSeparator />
         {users.map((user) => {
           const isActive = user.id === currentUserId;
-          const href = selectedPageId ? `/?page=${selectedPageId}` : "/";
+          const params = new URLSearchParams({
+            user: user.id,
+          });
+
+          if (selectedPageId) {
+            params.set("page", selectedPageId);
+          }
+
+          const href = `/impersonate?${params.toString()}`;
+          const handleSelect = () => {
+            window.location.href = href;
+          };
 
           return (
             <DropdownMenuItem
               key={user.id}
-              onSelect={() => {
-                document.cookie = `${IMPERSONATION_COOKIE}=${encodeURIComponent(user.id)}; path=/; max-age=${IMPERSONATION_MAX_AGE}; samesite=lax`;
-                window.location.assign(href);
-              }}
+              onClick={handleSelect}
+              onSelect={handleSelect}
               className="flex items-center justify-between gap-3"
             >
               <div className="min-w-0">

@@ -119,7 +119,39 @@ export const pageRevisions = pgTable(
   ],
 );
 
+export const pageEditSessions = pgTable(
+  "page_edit_sessions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    pageId: uuid("page_id")
+      .notNull()
+      .references(() => pages.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sessionKey: text("session_key").notNull(),
+    baseRevisionId: uuid("base_revision_id").references(() => pageRevisions.id, {
+      onDelete: "set null",
+    }),
+    draftTitle: text("draft_title").notNull(),
+    draftContentMarkdown: text("draft_content_markdown").notNull(),
+    draftEditorDocJson: jsonb("draft_editor_doc_json"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("page_edit_sessions_page_id_idx").on(table.pageId),
+    index("page_edit_sessions_user_id_idx").on(table.userId),
+    uniqueIndex("page_edit_sessions_page_user_session_idx").on(
+      table.pageId,
+      table.userId,
+      table.sessionKey,
+    ),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type Page = typeof pages.$inferSelect;
 export type PageRevision = typeof pageRevisions.$inferSelect;
+export type PageEditSession = typeof pageEditSessions.$inferSelect;

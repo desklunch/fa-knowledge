@@ -83,7 +83,7 @@ export function AppSidebar({
   const searchParams = useSearchParams();
   const [workspaceTrees, setWorkspaceTrees] = useState(visibleWorkspaces);
   const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({});
-  const [status, setStatus] = useState<{ kind: "error" | "success"; message: string } | null>(
+  const [, setStatus] = useState<{ kind: "error" | "success"; message: string } | null>(
     null,
   );
 
@@ -392,7 +392,7 @@ export function AppSidebar({
   return (
     <DndProvider backend={HTML5Backend}>
       <aside className="flex h-full min-h-0 min-w-0 flex-col border-r border-stone-200 bg-[#f7f5ef]">
-        <div className="border-b border-stone-200 ">
+        {/* <div className="border-b border-stone-200 ">
           <div className="bg-white/90 px-3 py-3 ">
           <div>
                 <h2 className="text-sm font-semibold text-stone-950">{currentUser.name}</h2>
@@ -403,7 +403,7 @@ export function AppSidebar({
   
             {status ? (
               <div
-                className={cn(
+                className={cn(iser
                   "mt-3 rounded-xl border px-3 py-2 text-xs",
                   status.kind === "error"
                     ? "border-red-200 bg-red-50 text-red-700"
@@ -414,7 +414,7 @@ export function AppSidebar({
               </div>
             ) : null}
           </div>
-        </div>
+        </div> */}
 
         <ScrollArea className="min-h-0 min-w-0 flex flex-col flex-1 overflow-hidden ">
           <div className="min-w-0 flex flex-col w-full overflow-hidden ">
@@ -428,11 +428,27 @@ export function AppSidebar({
                   onOpenChange={(open) => setExpanded(workspaceKey, open)}
                   open={isExpanded}
                 >
-                  <section className="w-full h-full min-w-0 flex-1 bg-white/90 p-2 border-b-1 border-stone-200 ">
-                    <div className="flex min-w-0 items-center gap-2 px-1 py-1 overflow-hidden">
-                      <CollapsibleTrigger asChild>
+                  <section className="w-full h-full min-w-0 flex-1 bg-white/90  border-b-1 border-stone-200">
+                    <div className="flex min-w-0 items-center  px-3 py-1 overflow-hiddenx">
+
+                      {/* <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-stone-100 text-stone-700">
+                        {workspace.type === "private" ? (
+                          <Lock className="h-4 w-4" />
+                        ) : (
+                          <Share2 className="h-4 w-4" />
+                        )}
+                      </span> */}
+                      <div className="min-w-0 flex-1 flex items-center gap-1 overflow-hidden">
+                        
+                        <p className="truncate text-[11px] font-semibold uppercase text-stone-500">
+                          {getWorkspaceLabel(workspace)}
+                        </p>
+                        {/* <p className="text-xs text-stone-400">
+                          {pages.length} root {pages.length === 1 ? "page" : "pages"}
+                        </p> */}
+                                              <CollapsibleTrigger asChild>
                         <button
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-100 hover:text-stone-900"
+                          className="inline-flex h-5 w-5 items-center justify-center rounded-md text-stone-500 transition hover:bg-stone-100 hover:text-stone-900"
                           type="button"
                         >
                           {isExpanded ? (
@@ -442,20 +458,6 @@ export function AppSidebar({
                           )}
                         </button>
                       </CollapsibleTrigger>
-                      {/* <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-stone-100 text-stone-700">
-                        {workspace.type === "private" ? (
-                          <Lock className="h-4 w-4" />
-                        ) : (
-                          <Share2 className="h-4 w-4" />
-                        )}
-                      </span> */}
-                      <div className="min-w-0 flex-1 overflow-hidden">
-                        <p className="truncate text-[11px] font-semibold uppercase text-stone-500">
-                          {workspace.name}
-                        </p>
-                        {/* <p className="text-xs text-stone-400">
-                          {pages.length} root {pages.length === 1 ? "page" : "pages"}
-                        </p> */}
                       </div>
                       <Button
                         className="h-8 w-8 shrink-0 rounded-lg"
@@ -486,17 +488,8 @@ export function AppSidebar({
                       </Button>
                     </div>
 
-                    <CollapsibleContent className="pt-1">
-                      <WorkspaceDropZone
-                        onDrop={(item) =>
-                          void handleMovePage(workspace.id, item.id, {
-                            destinationParentPageId: null,
-                            destinationIndex: pages.filter((candidate) => candidate.id !== item.id).length,
-                          })
-                        }
-                        workspaceId={workspace.id}
-                      />
-                      <div className="min-w-0 space-y-0.5">
+                    <CollapsibleContent className="">
+                      <div className="min-w-0 space-y-0.5 p-2 pt-0">
                         {pages.length === 0 ? (
                           <p className="px-3 py-2 text-sm text-stone-500">
                             No visible pages for this user.
@@ -531,6 +524,15 @@ export function AppSidebar({
                           ))
                         )}
                       </div>
+                      <WorkspaceDropZone
+                        onDrop={(item) =>
+                          void handleMovePage(workspace.id, item.id, {
+                            destinationParentPageId: null,
+                            destinationIndex: pages.filter((candidate) => candidate.id !== item.id).length,
+                          })
+                        }
+                        workspaceId={workspace.id}
+                      />
                     </CollapsibleContent>
                   </section>
                 </Collapsible>
@@ -674,7 +676,7 @@ function SidebarPageNode({
       onOpenChange={(open) => setExpanded(getPageExpansionKey(node.id), open)}
       open={hasChildren ? isExpanded : true}
     >
-      <div className="min-w-0 space-y-0.5">
+      <div className="min-w-0 ">
         <div
           className={cn(
             "relative w-full min-w-0 rounded-xl",
@@ -686,29 +688,29 @@ function SidebarPageNode({
         >
           <div
             className={cn(
-              "group flex w-full min-w-0 items-center gap-0 rounded-xl pr-1 transition",
+              "group flex w-full min-w-0 items-center gap-1 rounded-md  transition ",
               node.canWrite ? "cursor-grab active:cursor-grabbing" : "cursor-default",
               isSelected ? "bg-stone-900 text-white" : "text-stone-700 hover:bg-stone-100",
               isDragging && "opacity-50",
             )}
-            style={{ paddingLeft: `${8 + depth * 14}px` }}
+            style={{ paddingLeft: `${4 + depth * 14}px` }}
           >
             <div className="flex shrink-0 items-center gap-0.5">
               {hasChildren ? (
                 <CollapsibleTrigger asChild>
                   <button
                     className={cn(
-                      "inline-flex h-7 w-7 items-center justify-center rounded-md transition",
+                      "inline-flex h-7 w-6 items-center justify-center rounded-md transition",
                       isSelected
-                        ? "text-stone-200 hover:bg-white/10 hover:text-white"
-                        : "text-stone-400 hover:bg-stone-200/70 hover:text-stone-900",
+                        ? "text-stone-200 "
+                        : "text-stone-400 ",
                     )}
                     type="button"
                   >
                     {isExpanded ? (
-                      <ChevronDown className="h-4 w-4" />
+                      <ChevronDown className="h-4 " />
                     ) : (
-                      <ChevronRight className="h-4 w-4" />
+                      <ChevronRight className="h-4 " />
                     )}
                   </button>
                 </CollapsibleTrigger>
@@ -927,6 +929,10 @@ function WorkspaceDropZone({
 
 function getWorkspaceExpansionKey(workspaceId: string) {
   return `workspace:${workspaceId}`;
+}
+
+function getWorkspaceLabel(workspace: WorkspaceTree["workspace"]) {
+  return workspace.type === "private" ? "Personal" : "Shared";
 }
 
 function getPageExpansionKey(pageId: string) {

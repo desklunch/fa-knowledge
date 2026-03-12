@@ -13,7 +13,6 @@ type EditablePageFormProps = {
   initialTitle: string;
   currentRevisionId: string;
   pageId: string;
-  workspaceName: string;
 };
 
 export function EditablePageForm({
@@ -22,9 +21,9 @@ export function EditablePageForm({
   initialMarkdown,
   initialTitle,
   pageId,
-  workspaceName,
 }: EditablePageFormProps) {
   const router = useRouter();
+  const [editorSessionId] = useState(() => crypto.randomUUID());
   const initialEditorDocJsonString = useMemo(
     () => stringifyEditorDocJson(initialEditorDocJson),
     [initialEditorDocJson],
@@ -65,7 +64,9 @@ export function EditablePageForm({
           body: JSON.stringify({
             contentMarkdown,
             currentRevisionId: revisionId,
+            editorSessionId,
             editorDocJson: parseEditorDocJson(editorDocJson),
+            saveMode: reason,
             title,
           }),
         });
@@ -109,6 +110,7 @@ export function EditablePageForm({
       editorDocJson,
       isDirty,
       pageId,
+      editorSessionId,
       revisionId,
       router,
       savedTitle,
@@ -191,19 +193,33 @@ export function EditablePageForm({
         void persistDraft("manual");
       }}
     >
-      <section className="shrink-0 border border-b-1 border-stone-200 bg-white p-2">
-        <div className="min-w-0">
-          {/* <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
-            {workspaceName}
-          </p> */}
-          <input
-            name="title"
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder="Untitled"
-            className="w-full border-0 bg-transparent p-0 text-3xl font-semibold tracking-tight text-stone-950 outline-none placeholder:text-stone-400"
-          />
+      <section className="shrink-0 border-b border-stone-200 bg-white p-3">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <input
+              name="title"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="Untitled"
+              className="w-full border-0 bg-transparent p-0 text-xl font-semibold tracking-tight text-stone-950 outline-none placeholder:text-stone-400"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="shrink-0 rounded-full bg-stone-100 px-3 py-1 text-[10px] font-medium text-stone-600">
+              {getSaveStatusLabel(saveState, lastSavedAt)}
+            </div>
+            <button
+              type="submit"
+              disabled={saveState === "saving" || !isDirty}
+              className="shrink-0 rounded-full bg-stone-900 px-3 py-1 text-[10px] font-medium text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+            >
+              Save version
+            </button>
+          </div>
         </div>
+        {saveState === "error" ? (
+          <p className="text-xs text-red-700">{saveError ?? "Saving failed."}</p>
+        ) : null}
       </section>
 
       <PageEditor
@@ -211,58 +227,7 @@ export function EditablePageForm({
         initialMarkdown={initialMarkdown}
         onChange={handleEditorChange}
       />
-
-      {/* <div className="shrink-0 flex flex-col gap-4 rounded-[1.5rem] border border-stone-200 bg-white px-5 py-4 md:flex-row md:items-center md:justify-between">
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-stone-800">
-            Every save writes a new immutable revision snapshot.
-          </p>
-          <p className="text-sm text-stone-600">
-            {saveState === "error"
-              ? saveError ?? "Saving failed."
-              : isDirty
-                ? "Unsaved changes will autosave after a short pause."
-                : lastSavedAt
-                  ? `Last saved at ${formatTime(lastSavedAt)}.`
-                  : "All document changes are saved to the latest revision."}
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
-            {saveState === "saving"
-              ? "Saving"
-              : saveState === "error"
-                ? "Error"
-                : isDirty
-                  ? "Unsaved"
-                  : "Synced"}
-          </span>
-          <SaveButton isDirty={isDirty} isSaving={saveState === "saving"} />
-        </div>
-      </div> */}
     </form>
-  );
-}
-
-function SaveButton({
-  isDirty,
-  isSaving,
-}: {
-  isDirty: boolean;
-  isSaving: boolean;
-}) {
-  return (
-    <button
-      type="submit"
-      disabled={isSaving || !isDirty}
-      className={`rounded-full px-4 py-2 text-sm font-medium transition ${
-        isSaving || !isDirty
-          ? "cursor-not-allowed bg-stone-300 text-stone-600"
-          : "bg-stone-900 text-white hover:bg-stone-700"
-      }`}
-    >
-      {isSaving ? "Saving..." : "Save page"}
-    </button>
   );
 }
 
@@ -291,4 +256,24 @@ function formatTime(value: Date) {
     hour: "numeric",
     minute: "2-digit",
   }).format(value);
+}
+
+function getSaveStatusLabel(state: SaveState, lastSavedAt: Date | null) {
+  if (state === "saving") {
+    return "Saving...";
+  }
+
+  if (state === "unsaved") {
+    return "Unsaved changes";
+  }
+
+  if (state === "error") {
+    return "Save failed";
+  }
+
+  if (lastSavedAt) {
+    return `Saved ${formatTime(lastSavedAt)}`;
+  }
+
+  return "Saved";
 }

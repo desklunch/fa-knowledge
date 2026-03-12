@@ -1,6 +1,6 @@
-import { deletePageAction } from "@/app/actions";
 import { AppSidebar } from "@/components/app-sidebar";
 import { EditablePageForm } from "@/components/editable-page-form";
+import { PageMetadataForm } from "@/components/page-metadata-form";
 import { UserSwitcher } from "@/components/user-switcher";
 import {
   Collapsible,
@@ -13,7 +13,7 @@ import {
   Clock3,
   ChevronDown,
   ChevronRight,
-  LayoutDashboard,
+  TreePalm,
   PanelLeftOpen,
   Shield,
 } from "lucide-react";
@@ -33,6 +33,7 @@ export default async function Home({ searchParams }: HomeProps) {
   const {
     availableUsers,
     currentUser,
+    selectedDraft,
     selectedPage,
     selectedPageRevisions,
     selectedRevision,
@@ -55,11 +56,11 @@ export default async function Home({ searchParams }: HomeProps) {
       <header className="border-b border-stone-200 bg-white/95 backdrop-blur">
         <div className="flex h-14 items-center justify-between gap-4 px-2">
           <div className="flex items-center gap-3">
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-stone-950 text-white">
-              <LayoutDashboard className="h-4 w-4" />
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-md bg-[#f3f1ea] text-stone-600">
+              <TreePalm className="h-6 w-6 stroke-[1.25px]" />
             </span>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-600">
                 fa-knowledge-app
               </p>
 
@@ -88,7 +89,7 @@ export default async function Home({ searchParams }: HomeProps) {
           visibleWorkspaces={visibleWorkspaces}
         />
 
-        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#fbfaf7] border border-stone-200 border-4">
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#fbfaf7]">
           {selectedPage && selectedRevision ? (
             <>
               {params.message ? (
@@ -109,10 +110,13 @@ export default async function Home({ searchParams }: HomeProps) {
                     key={`form-${selectedPage.id}-${selectedRevision.id}`}
                     currentRevisionId={selectedRevision.id}
                     pageId={selectedPage.id}
-                    initialTitle={selectedPage.title}
-                    initialEditorDocJson={selectedRevision.editorDocJson}
-                    initialMarkdown={selectedRevision.contentMarkdown}
-                    workspaceName={currentWorkspace?.name ?? "Workspace"}
+                    initialTitle={selectedDraft?.title ?? selectedPage.title}
+                    initialEditorDocJson={
+                      selectedDraft?.editorDocJson ?? selectedRevision.editorDocJson
+                    }
+                    initialMarkdown={
+                      selectedDraft?.contentMarkdown ?? selectedRevision.contentMarkdown
+                    }
                   />
                 ) : (
                   <article className="flex h-full min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-stone-200 bg-white shadow-sm">
@@ -184,14 +188,12 @@ export default async function Home({ searchParams }: HomeProps) {
             <div>
               <SidebarPanel title="Page overview">
                 <div className="grid gap-2 text-sm text-stone-600">
-                  <InlineMetric label="Title" value={selectedPage.title} />
+                  <InlineMetric label="Title" value={selectedDraft?.title ?? selectedPage.title} />
                   <InlineMetric label="Current revision" value={String(selectedRevision.revisionNumber)} />
                   <InlineMetric label="Visible revisions" value={String(selectedPageRevisions.length)} />
-                  <InlineMetric label="Read level" value={String(selectedPage.effectiveReadLevel ?? "private")} />
-                  <InlineMetric label="Write level" value={String(selectedPage.effectiveWriteLevel ?? "private")} />
                   <InlineMetric
                     label="Reading time"
-                    value={`${Math.max(1, Math.ceil(getReadingWords(selectedRevision.contentMarkdown) / 220))} min`}
+                    value={`${Math.max(1, Math.ceil(getReadingWords((selectedDraft?.contentMarkdown ?? selectedRevision.contentMarkdown)) / 220))} min`}
                   />
                   <InlineMetric
                     label="Save behavior"
@@ -200,30 +202,31 @@ export default async function Home({ searchParams }: HomeProps) {
                 </div>
               </SidebarPanel>
 
-              {selectedPage.canWrite ? (
-                <>
-                  <SidebarPanel title="Danger zone">
-                    <form action={deletePageAction}>
-                      <input type="hidden" name="pageId" value={selectedPage.id} />
-                      <button type="submit" className="w-full rounded-xl bg-red-700 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-red-800">
-                        Delete page
-                      </button>
-                    </form>
-                  </SidebarPanel>
-                </>
-              ) : null}
+              <SidebarPanel title="Permissions">
+                <PageMetadataForm
+                  canWrite={selectedPage.canWrite}
+                  explicitReadLevel={selectedPage.explicitReadLevel}
+                  explicitWriteLevel={selectedPage.explicitWriteLevel}
+                  hasParent={selectedPage.parentPageId !== null}
+                  pageId={selectedPage.id}
+                  workspaceType={currentWorkspace?.type ?? "shared"}
+                />
+              </SidebarPanel>
 
+             
               <SidebarPanel title="Recent revisions">
-                <div className="space-y-2">
+                <div className="">
                   {selectedPageRevisions.slice(0, 6).map((revision) => (
-                    <div key={revision.id} className="rounded-xl bg-stone-50 px-3 py-3 text-sm">
-                      <p className="font-medium text-stone-900">
+                    <div key={revision.id} className=" bg-stone-50  py-2 text-sm border-b border-stone-200 flex items-center justify-between last:border-none">
+                      
+                      <p className="text-xs font-medium text-stone-900">
                         Revision {revision.revisionNumber}
                       </p>
-                      <p className="mt-1 text-stone-600">{revision.titleSnapshot}</p>
-                      <p className="mt-2 text-xs text-stone-500">
+                      <p className="text-xs text-stone-500">
                         {revision.createdAt.toLocaleDateString()}
                       </p>
+                      {/* <p className="text-stone-600">{revision.titleSnapshot}</p> */}
+              
                     </div>
                   ))}
                 </div>
@@ -294,9 +297,9 @@ function SidebarPanel({
 
 function InlineMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between rounded-xl bg-white px-3 py-2.5">
-      <span className="text-stone-500">{label}</span>
-      <span className="font-medium text-stone-900">{value}</span>
+    <div className="flex items-center justify-between py-2 border-b border-stone-200 last:border-none">
+      <span className=" text-xs text-stone-500">{label}</span>
+      <span className="text-xs font-medium text-stone-900">{value}</span>
     </div>
   );
 }

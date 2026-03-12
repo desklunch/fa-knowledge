@@ -8,6 +8,13 @@
       "when": 1773242065564,
       "tag": "0000_shallow_doctor_octopus",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1773342824570,
+      "tag": "0001_familiar_mister_sinister",
+      "breakpoints": true
     }
   ]
 }

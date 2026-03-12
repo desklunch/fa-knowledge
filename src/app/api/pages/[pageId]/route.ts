@@ -7,6 +7,9 @@ import { getImpersonatedUserId } from "@/lib/impersonation";
 const savePageSchema = z.object({
   title: z.string().min(1),
   contentMarkdown: z.string().min(1),
+  currentRevisionId: z.string().uuid().nullable().optional(),
+  editorSessionId: z.string().min(1).nullable().optional(),
+  saveMode: z.enum(["autosave", "manual"]).optional(),
   editorDocJson: z.unknown().nullable().optional(),
 });
 
@@ -41,7 +44,11 @@ export async function PATCH(
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to save page.";
-    const status = message.includes("permission") ? 403 : 400;
+    const status = message.includes("newer revision")
+      ? 409
+      : message.includes("permission")
+        ? 403
+        : 400;
 
     return NextResponse.json({ error: message }, { status });
   }

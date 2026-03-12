@@ -5,8 +5,10 @@ import { and, asc, desc, eq, max } from "drizzle-orm";
 import { db } from "@/db/client";
 import { seededPages, seededRevisions, seededUsers, seededWorkspaces } from "@/db/seed-data";
 import {
+  pageEditSessions,
   pageRevisions,
   pages,
+  type PageEditSession,
   type Page,
   type PageRevision,
   type User,
@@ -27,6 +29,7 @@ type KnowledgeBaseSnapshot = {
   workspaces: Workspace[];
   pages: Page[];
   revisions: PageRevision[];
+  editSessions: PageEditSession[];
 };
 
 type PageContext = {
@@ -56,6 +59,11 @@ export type KnowledgeBaseView = {
   selectedPageId: string | null;
   selectedPage: (Page & { canWrite: boolean }) | null;
   selectedRevision: PageRevision | null;
+  selectedDraft: {
+    title: string;
+    contentMarkdown: string;
+    editorDocJson: unknown;
+  } | null;
   selectedPageRevisions: RevisionSummary[];
   visibleWorkspaces: Array<{
     workspace: Workspace;
@@ -68,7 +76,17 @@ export type SavePageInput = {
   pageId: string;
   title: string;
   contentMarkdown: string;
+  currentRevisionId?: string | null;
+  editorSessionId?: string | null;
+  saveMode?: "autosave" | "manual";
   editorDocJson?: unknown;
+};
+
+export type UpdatePageMetadataInput = {
+  actingUserId: string;
+  pageId: string;
+  explicitReadLevel?: number | null;
+  explicitWriteLevel?: number | null;
 };
 
 export type CreatePageInput = {
@@ -113,6 +131,10 @@ export type DeletePageResult = {
   redirectPageId: string | null;
 };
 
+export type UpdatePageMetadataResult = {
+  page: Page;
+};
+
 const MAX_PAGE_DEPTH = 5;
 
 function buildSeedSnapshot(): KnowledgeBaseSnapshot {
@@ -134,6 +156,7 @@ function buildSeedSnapshot(): KnowledgeBaseSnapshot {
     workspaces: seededWorkspaces as Workspace[],
     pages: seededPageRows,
     revisions: seededRevisionRows,
+    editSessions: [],
   };
 }
 
@@ -149,7 +172,7 @@ async function getSnapshot(): Promise<KnowledgeBaseSnapshot> {
   }
 
   try {
-    const [userRows, workspaceRows, pageRows, revisionRows] = await Promise.all([
+    const [userRows, workspaceRows, pageRows, revisionRows, editSessionRows] = await Promise.all([
       db.select().from(users).orderBy(desc(users.permissionLevel), asc(users.name)),
       db.select().from(workspaces).orderBy(asc(workspaces.type), asc(workspaces.name)),
       db.select().from(pages).orderBy(asc(pages.path), asc(pages.sortOrder)),
@@ -157,6 +180,10 @@ async function getSnapshot(): Promise<KnowledgeBaseSnapshot> {
         .select()
         .from(pageRevisions)
         .orderBy(desc(pageRevisions.revisionNumber), desc(pageRevisions.createdAt)),
+      db
+        .select()
+        .from(pageEditSessions)
+        .orderBy(desc(pageEditSessions.updatedAt)),
     ]);
 
     return {
@@ -164,6 +191,7 @@ async function getSnapshot(): Promise<KnowledgeBaseSnapshot> {
       workspaces: workspaceRows,
       pages: pageRows,
       revisions: revisionRows,
+      editSessions: editSessionRows,
     };
   } catch (error) {
     console.error("Failed to load knowledge base snapshot from database.", error);
@@ -263,6 +291,34 @@ function getPageRevisionsFromSnapshot(snapshot: KnowledgeBaseSnapshot, pageId: s
   return snapshot.revisions
     .filter((revision) => revision.pageId === pageId)
     .sort((a, b) => b.revisionNumber - a.revisionNumber);
+}
+
+function getLatestEditSessionForPageFromSnapshot(
+  snapshot: KnowledgeBaseSnapshot,
+  pageId: string,
+  userId: string,
+) {
+  return (
+    snapshot.editSessions
+      .filter((session) => session.pageId === pageId && session.userId === userId)
+      .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0] ?? null
+  );
+}
+
+function getEditSessionFromSnapshot(
+  snapshot: KnowledgeBaseSnapshot,
+  pageId: string,
+  userId: string,
+  sessionKey: string,
+) {
+  return (
+    snapshot.editSessions.find(
+      (session) =>
+        session.pageId === pageId &&
+        session.userId === userId &&
+        session.sessionKey === sessionKey,
+    ) ?? null
+  );
 }
 
 function toRevisionSummary(revision: PageRevision): RevisionSummary {
@@ -466,6 +522,126 @@ function assertPageWriteAccess(snapshot: KnowledgeBaseSnapshot, input: SavePageI
   return context;
 }
 
+function assertCurrentRevisionMatches(page: Page, currentRevisionId?: string | null) {
+  if (!currentRevisionId) {
+    return;
+  }
+
+  if (page.currentRevisionId !== currentRevisionId) {
+    throw new Error("A newer revision exists. Reload this page before saving again.");
+  }
+}
+
+function upsertFallbackEditSession(
+  currentSessions: PageEditSession[],
+  input: {
+    pageId: string;
+    userId: string;
+    sessionKey: string;
+    baseRevisionId: string | null;
+    draftTitle: string;
+    draftContentMarkdown: string;
+    draftEditorDocJson: unknown;
+  },
+) {
+  const existingSession = currentSessions.find(
+    (session) =>
+      session.pageId === input.pageId &&
+      session.userId === input.userId &&
+      session.sessionKey === input.sessionKey,
+  );
+
+  if (!existingSession) {
+    return [
+      {
+        id: randomUUID(),
+        pageId: input.pageId,
+        userId: input.userId,
+        sessionKey: input.sessionKey,
+        baseRevisionId: input.baseRevisionId,
+        draftTitle: input.draftTitle,
+        draftContentMarkdown: input.draftContentMarkdown,
+        draftEditorDocJson: input.draftEditorDocJson ?? null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } satisfies PageEditSession,
+      ...currentSessions,
+    ];
+  }
+
+  return currentSessions.map((session) =>
+    session.id === existingSession.id
+      ? {
+          ...session,
+          baseRevisionId: input.baseRevisionId,
+          draftTitle: input.draftTitle,
+          draftContentMarkdown: input.draftContentMarkdown,
+          draftEditorDocJson: input.draftEditorDocJson ?? null,
+          updatedAt: new Date(),
+        }
+      : session,
+  );
+}
+
+function computeSubtreePermissionUpdates(params: {
+  pageRows: Page[];
+  rootPage: Page;
+  workspace: Workspace;
+  explicitReadLevel?: number | null;
+  explicitWriteLevel?: number | null;
+  actingUser: User;
+}) {
+  if (params.workspace.type === "private") {
+    return [
+      {
+        ...params.rootPage,
+        explicitReadLevel: null,
+        explicitWriteLevel: null,
+        effectiveReadLevel: null,
+        effectiveWriteLevel: null,
+        updatedAt: new Date(),
+      },
+    ];
+  }
+
+  const subtree = getSubtreePages(params.pageRows, params.rootPage);
+  const updates = new Map<string, Page>();
+
+  for (const page of subtree) {
+    const nextParentPage = page.parentPageId
+      ? updates.get(page.parentPageId) ??
+        params.pageRows.find((candidate) => candidate.id === page.parentPageId) ??
+        null
+      : null;
+    const permissions = resolvePermissions({
+      workspace: params.workspace,
+      parentPage: nextParentPage,
+      explicitReadLevel:
+        page.id === params.rootPage.id ? params.explicitReadLevel : page.explicitReadLevel,
+      explicitWriteLevel:
+        page.id === params.rootPage.id ? params.explicitWriteLevel : page.explicitWriteLevel,
+    });
+
+    if (
+      permissions.effectiveWriteLevel !== null &&
+      params.actingUser.permissionLevel < permissions.effectiveWriteLevel
+    ) {
+      throw new Error("You cannot set page permissions level.");
+    }
+
+    updates.set(page.id, {
+      ...page,
+      explicitReadLevel: permissions.explicitReadLevel,
+      explicitWriteLevel: permissions.explicitWriteLevel,
+      effectiveReadLevel: permissions.effectiveReadLevel,
+      effectiveWriteLevel: permissions.effectiveWriteLevel,
+      updatedAt: new Date(),
+    });
+  }
+
+  return Array.from(updates.values());
+}
+
 function isDescendantPath(descendantPath: string, ancestorPath: string) {
   return descendantPath === ancestorPath || descendantPath.startsWith(`${ancestorPath}/`);
 }
@@ -658,6 +834,7 @@ export async function getKnowledgeBaseView(input: {
       selectedPageId: null,
       selectedPage: null,
       selectedRevision: null,
+      selectedDraft: null,
       selectedPageRevisions: [],
       visibleWorkspaces: [],
     };
@@ -672,6 +849,10 @@ export async function getKnowledgeBaseView(input: {
   const selectedRevision = selectedPage
     ? getRevisionForPageFromSnapshot(snapshot, selectedPage.id, selectedPage.currentRevisionId)
     : null;
+  const selectedDraft =
+    selectedPage && currentUser
+      ? getLatestEditSessionForPageFromSnapshot(snapshot, selectedPage.id, currentUser.id)
+      : null;
   const selectedPageRevisions = selectedPage
     ? getPageRevisionsFromSnapshot(snapshot, selectedPage.id).map(toRevisionSummary)
     : [];
@@ -682,6 +863,13 @@ export async function getKnowledgeBaseView(input: {
     selectedPageId: selectedPage?.id ?? null,
     selectedPage,
     selectedRevision,
+    selectedDraft: selectedDraft
+      ? {
+          title: selectedDraft.draftTitle,
+          contentMarkdown: selectedDraft.draftContentMarkdown,
+          editorDocJson: selectedDraft.draftEditorDocJson,
+        }
+      : null,
     selectedPageRevisions,
     visibleWorkspaces,
   };
@@ -701,8 +889,53 @@ export async function getPageRevisions(input: { actingUserId: string; pageId: st
 function updateFallbackPage(input: SavePageInput): SavePageResult {
   const snapshot = fallbackStore;
   const { actingUser, page } = assertPageWriteAccess(snapshot, input);
-  const previousRevision =
-    getPageRevisionsFromSnapshot(snapshot, page.id)[0] ?? null;
+  assertCurrentRevisionMatches(page, input.currentRevisionId);
+  const previousRevision = getPageRevisionsFromSnapshot(snapshot, page.id)[0] ?? null;
+  const saveMode = input.saveMode ?? "manual";
+
+  if (saveMode === "autosave") {
+    if (!input.editorSessionId) {
+      throw new Error("Autosave requires an editor session.");
+    }
+
+    const existingSession = getEditSessionFromSnapshot(
+      snapshot,
+      page.id,
+      actingUser.id,
+      input.editorSessionId,
+    );
+
+    if (existingSession) {
+      const baseRevision =
+        snapshot.revisions.find((revision) => revision.id === existingSession.baseRevisionId) ??
+        previousRevision;
+
+      if (!baseRevision) {
+        throw new Error("Session revision not found.");
+      }
+
+      const updatedSession: PageEditSession = {
+        ...existingSession,
+        draftTitle: input.title,
+        draftContentMarkdown: input.contentMarkdown,
+        draftEditorDocJson: input.editorDocJson ?? null,
+        updatedAt: new Date(),
+      };
+
+      fallbackStore = {
+        ...snapshot,
+        editSessions: snapshot.editSessions.map((session) =>
+          session.id === updatedSession.id ? updatedSession : session,
+        ),
+      };
+
+      return {
+        page,
+        revision: baseRevision,
+      };
+    }
+  }
+
   const revision: PageRevision = {
     id: randomUUID(),
     pageId: page.id,
@@ -720,6 +953,17 @@ function updateFallbackPage(input: SavePageInput): SavePageResult {
     updatedByUserId: actingUser.id,
     updatedAt: new Date(),
   };
+  const nextEditSessions = input.editorSessionId
+    ? upsertFallbackEditSession(snapshot.editSessions, {
+        pageId: page.id,
+        userId: actingUser.id,
+        sessionKey: input.editorSessionId,
+        baseRevisionId: revision.id,
+        draftTitle: input.title,
+        draftContentMarkdown: input.contentMarkdown,
+        draftEditorDocJson: input.editorDocJson ?? null,
+      })
+    : snapshot.editSessions;
 
   fallbackStore = {
     ...snapshot,
@@ -727,6 +971,7 @@ function updateFallbackPage(input: SavePageInput): SavePageResult {
       pageRow.id === updatedPage.id ? updatedPage : pageRow,
     ),
     revisions: [revision, ...snapshot.revisions],
+    editSessions: nextEditSessions,
   };
 
   return {
@@ -736,6 +981,234 @@ function updateFallbackPage(input: SavePageInput): SavePageResult {
 }
 
 async function updateDatabasePage(input: SavePageInput): Promise<SavePageResult> {
+  if (!db) {
+    throw new Error("DATABASE_URL is required for database writes.");
+  }
+
+  return db.transaction(async (tx) => {
+    const [actingUser] = await tx
+      .select()
+      .from(users)
+      .where(eq(users.id, input.actingUserId))
+      .limit(1);
+
+    if (!actingUser) {
+      throw new Error("Acting user not found.");
+    }
+
+    const [page] = await tx.select().from(pages).where(eq(pages.id, input.pageId)).limit(1);
+
+    if (!page) {
+      throw new Error("Page not found.");
+    }
+    assertCurrentRevisionMatches(page, input.currentRevisionId);
+
+    const [workspace] = await tx
+      .select()
+      .from(workspaces)
+      .where(eq(workspaces.id, page.workspaceId))
+      .limit(1);
+
+    if (!workspace) {
+      throw new Error("Workspace not found.");
+    }
+
+    if (!canWritePage(actingUser, workspace, page)) {
+      throw new Error("You do not have permission to edit this page.");
+    }
+
+    const saveMode = input.saveMode ?? "manual";
+
+    if (saveMode === "autosave") {
+      if (!input.editorSessionId) {
+        throw new Error("Autosave requires an editor session.");
+      }
+
+      const existingSession =
+        (
+          await tx
+            .select()
+            .from(pageEditSessions)
+            .where(
+              and(
+                eq(pageEditSessions.pageId, page.id),
+                eq(pageEditSessions.userId, actingUser.id),
+                eq(pageEditSessions.sessionKey, input.editorSessionId),
+              ),
+            )
+            .limit(1)
+        )[0] ?? null;
+
+      if (existingSession) {
+        await tx
+          .update(pageEditSessions)
+          .set({
+            draftTitle: input.title,
+            draftContentMarkdown: input.contentMarkdown,
+            draftEditorDocJson: input.editorDocJson ?? null,
+            updatedAt: new Date(),
+          })
+          .where(eq(pageEditSessions.id, existingSession.id));
+
+        const baseRevision =
+          existingSession.baseRevisionId
+            ? (
+                await tx
+                  .select()
+                  .from(pageRevisions)
+                  .where(eq(pageRevisions.id, existingSession.baseRevisionId))
+                  .limit(1)
+              )[0] ?? null
+            : null;
+
+        if (!baseRevision) {
+          throw new Error("Session revision not found.");
+        }
+
+        return {
+          page,
+          revision: baseRevision,
+        };
+      }
+    }
+
+    const [{ value: currentRevisionNumber }] = await tx
+      .select({
+        value: max(pageRevisions.revisionNumber),
+      })
+      .from(pageRevisions)
+      .where(eq(pageRevisions.pageId, page.id));
+
+    const [revision] = await tx
+      .insert(pageRevisions)
+      .values({
+        pageId: page.id,
+        revisionNumber: (currentRevisionNumber ?? 0) + 1,
+        titleSnapshot: input.title,
+        contentMarkdown: input.contentMarkdown,
+        editorDocJson: input.editorDocJson ?? null,
+        createdByUserId: actingUser.id,
+      })
+      .returning();
+
+    const [updatedPage] = await tx
+      .update(pages)
+      .set({
+        title: input.title,
+        currentRevisionId: revision.id,
+        updatedByUserId: actingUser.id,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(pages.id, page.id), eq(pages.workspaceId, workspace.id)))
+      .returning();
+
+    if (input.editorSessionId) {
+      const existingSession =
+        (
+          await tx
+            .select()
+            .from(pageEditSessions)
+            .where(
+              and(
+                eq(pageEditSessions.pageId, page.id),
+                eq(pageEditSessions.userId, actingUser.id),
+                eq(pageEditSessions.sessionKey, input.editorSessionId),
+              ),
+            )
+            .limit(1)
+        )[0] ?? null;
+
+      if (existingSession) {
+        await tx
+          .update(pageEditSessions)
+          .set({
+            baseRevisionId: revision.id,
+            draftTitle: input.title,
+            draftContentMarkdown: input.contentMarkdown,
+            draftEditorDocJson: input.editorDocJson ?? null,
+            updatedAt: new Date(),
+          })
+          .where(eq(pageEditSessions.id, existingSession.id));
+      } else {
+        await tx.insert(pageEditSessions).values({
+          pageId: page.id,
+          userId: actingUser.id,
+          sessionKey: input.editorSessionId,
+          baseRevisionId: revision.id,
+          draftTitle: input.title,
+          draftContentMarkdown: input.contentMarkdown,
+          draftEditorDocJson: input.editorDocJson ?? null,
+        });
+      }
+    }
+
+    return {
+      page: updatedPage,
+      revision,
+    };
+  });
+}
+
+export async function savePage(input: SavePageInput): Promise<SavePageResult> {
+  const title = requireNonEmpty(input.title, "Title");
+  const contentMarkdown = requireNonEmpty(input.contentMarkdown, "Markdown content");
+
+  if (!db) {
+    return updateFallbackPage({
+      ...input,
+      title,
+      contentMarkdown,
+    });
+  }
+
+  return updateDatabasePage({
+    ...input,
+    title,
+    contentMarkdown,
+  });
+}
+
+function updateFallbackPageMetadata(
+  input: UpdatePageMetadataInput,
+): UpdatePageMetadataResult {
+  const snapshot = fallbackStore;
+  const { actingUser, page, workspace } = getPageContext(snapshot, input);
+
+  if (!canWritePage(actingUser, workspace, page)) {
+    throw new Error("You do not have permission to edit this page.");
+  }
+
+  const updates = computeSubtreePermissionUpdates({
+    pageRows: snapshot.pages,
+    rootPage: page,
+    workspace,
+    explicitReadLevel: input.explicitReadLevel,
+    explicitWriteLevel: input.explicitWriteLevel,
+    actingUser,
+  }).map((updatedPage) => ({
+    ...updatedPage,
+    updatedByUserId: actingUser.id,
+  }));
+  const updatesById = new Map(updates.map((updatedPage) => [updatedPage.id, updatedPage]));
+  const updatedRootPage = updatesById.get(page.id);
+
+  if (!updatedRootPage) {
+    throw new Error("Failed to update page permissions.");
+  }
+
+  fallbackStore = {
+    ...snapshot,
+    pages: snapshot.pages.map((pageRow) => updatesById.get(pageRow.id) ?? pageRow),
+  };
+
+  return {
+    page: updatedRootPage,
+  };
+}
+
+async function updateDatabasePageMetadata(
+  input: UpdatePageMetadataInput,
+): Promise<UpdatePageMetadataResult> {
   if (!db) {
     throw new Error("DATABASE_URL is required for database writes.");
   }
@@ -771,60 +1244,59 @@ async function updateDatabasePage(input: SavePageInput): Promise<SavePageResult>
       throw new Error("You do not have permission to edit this page.");
     }
 
-    const [{ value: currentRevisionNumber }] = await tx
-      .select({
-        value: max(pageRevisions.revisionNumber),
-      })
-      .from(pageRevisions)
-      .where(eq(pageRevisions.pageId, page.id));
+    const pageRows = await tx
+      .select()
+      .from(pages)
+      .where(eq(pages.workspaceId, workspace.id))
+      .orderBy(asc(pages.path), asc(pages.sortOrder));
+    const updates = computeSubtreePermissionUpdates({
+      pageRows,
+      rootPage: page,
+      workspace,
+      explicitReadLevel: input.explicitReadLevel,
+      explicitWriteLevel: input.explicitWriteLevel,
+      actingUser,
+    });
+    const updatesById = new Map(updates.map((updatedPage) => [updatedPage.id, updatedPage]));
 
-    const [revision] = await tx
-      .insert(pageRevisions)
-      .values({
-        pageId: page.id,
-        revisionNumber: (currentRevisionNumber ?? 0) + 1,
-        titleSnapshot: input.title,
-        contentMarkdown: input.contentMarkdown,
-        editorDocJson: input.editorDocJson ?? null,
-        createdByUserId: actingUser.id,
-      })
-      .returning();
+    for (const updatedPage of updates) {
+      await tx
+        .update(pages)
+        .set({
+          explicitReadLevel: updatedPage.explicitReadLevel,
+          explicitWriteLevel: updatedPage.explicitWriteLevel,
+          effectiveReadLevel: updatedPage.effectiveReadLevel,
+          effectiveWriteLevel: updatedPage.effectiveWriteLevel,
+          updatedByUserId: actingUser.id,
+          updatedAt: updatedPage.updatedAt,
+        })
+        .where(eq(pages.id, updatedPage.id));
+    }
 
-    const [updatedPage] = await tx
-      .update(pages)
-      .set({
-        title: input.title,
-        currentRevisionId: revision.id,
-        updatedByUserId: actingUser.id,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(pages.id, page.id), eq(pages.workspaceId, workspace.id)))
-      .returning();
+    const [updatedRootPage] = await tx
+      .select()
+      .from(pages)
+      .where(eq(pages.id, page.id))
+      .limit(1);
+
+    if (!updatedRootPage || !updatesById.has(page.id)) {
+      throw new Error("Failed to update page permissions.");
+    }
 
     return {
-      page: updatedPage,
-      revision,
+      page: updatedRootPage,
     };
   });
 }
 
-export async function savePage(input: SavePageInput): Promise<SavePageResult> {
-  const title = requireNonEmpty(input.title, "Title");
-  const contentMarkdown = requireNonEmpty(input.contentMarkdown, "Markdown content");
-
+export async function updatePageMetadata(
+  input: UpdatePageMetadataInput,
+): Promise<UpdatePageMetadataResult> {
   if (!db) {
-    return updateFallbackPage({
-      ...input,
-      title,
-      contentMarkdown,
-    });
+    return updateFallbackPageMetadata(input);
   }
 
-  return updateDatabasePage({
-    ...input,
-    title,
-    contentMarkdown,
-  });
+  return updateDatabasePageMetadata(input);
 }
 
 function createFallbackPage(input: CreatePageInput): CreatePageResult {
@@ -1354,6 +1826,7 @@ async function deleteDatabasePage(input: DeletePageInput): Promise<DeletePageRes
         workspaces: [workspace],
         pages: workspacePages,
         revisions: [],
+        editSessions: [],
       },
       page,
     );
