@@ -3,7 +3,17 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
 type MetadataSaveState = "idle" | "saving" | "saved" | "error";
+const INHERIT_VALUE = "__inherit__";
 
 type PageMetadataFormProps = {
   canWrite: boolean;
@@ -90,34 +100,42 @@ export function PageMetadataForm({
       <div className="flex gap-4">
       <label className="w-full grid gap-2 text-sm">
         <span className="font-medium text-stone-700">Read</span>
-        <select
-          value={readLevel}
-          onChange={(event) => setReadLevel(event.target.value)}
+        <Select
           disabled={!canWrite}
-          className="rounded-md border border-stone-200 bg-white px-3 py-2 text-stone-900 disabled:cursor-not-allowed disabled:bg-stone-100"
+          onValueChange={setReadLevel}
+          value={readLevel}
         >
-          {readOptions.map((option) => (
-            <option key={option.value} value={option.value} >
-              {option.label}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger>
+            <SelectValue placeholder="Select read level" />
+          </SelectTrigger>
+          <SelectContent>
+            {readOptions.map((option) => (
+              <SelectItem key={option.value || "inherit-read"} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </label>
 
       <label className="w-full grid gap-2 text-sm">
         <span className="font-medium text-stone-700">Write</span>
-        <select
-          value={writeLevel}
-          onChange={(event) => setWriteLevel(event.target.value)}
+        <Select
           disabled={!canWrite}
-          className="rounded-md border border-stone-200 bg-white px-3 py-2 text-stone-900 disabled:cursor-not-allowed disabled:bg-stone-100"
+          onValueChange={setWriteLevel}
+          value={writeLevel}
         >
-          {writeOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger>
+            <SelectValue placeholder="Select write level" />
+          </SelectTrigger>
+          <SelectContent>
+            {writeOptions.map((option) => (
+              <SelectItem key={option.value || "inherit-write"} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </label>
       </div>
       {saveError ? <p className="text-sm text-red-700">{saveError}</p> : null}
@@ -134,14 +152,13 @@ export function PageMetadataForm({
                   ? "Unsaved"
                   : "No changes"}
         </span>
-        <button
-          type="button"
+        <Button
           onClick={() => void handleSave()}
           disabled={!canWrite || !isDirty || saveState === "saving"}
-          className="rounded-md bg-stone-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+          type="button"
         >
           {saveState === "saving" ? "Saving..." : "Save"}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -149,7 +166,7 @@ export function PageMetadataForm({
 
 function buildLevelOptions(canInherit: boolean) {
   return [
-    ...(canInherit ? [{ value: "", label: "Inherit" }] : []),
+    ...(canInherit ? [{ value: INHERIT_VALUE, label: "Inherit" }] : []),
     { value: "1", label: "Level 1" },
     { value: "2", label: "Level 2" },
     { value: "3", label: "Level 3" },
@@ -157,7 +174,7 @@ function buildLevelOptions(canInherit: boolean) {
 }
 
 function parseLevel(value: string) {
-  if (!value) {
+  if (!value || value === INHERIT_VALUE) {
     return null;
   }
 
@@ -165,5 +182,5 @@ function parseLevel(value: string) {
 }
 
 function stringifyLevel(value: number | null) {
-  return value === null ? "" : String(value);
+  return value === null ? INHERIT_VALUE : String(value);
 }

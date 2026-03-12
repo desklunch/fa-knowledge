@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { PageEditor } from "@/components/page-editor";
+import { PageEditor, type PageEditorHandle } from "@/components/page-editor";
 
 type SaveState = "saved" | "saving" | "unsaved" | "error";
 
@@ -39,6 +39,9 @@ export function EditablePageForm({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [revisionId, setRevisionId] = useState(currentRevisionId);
+  const [isPasteModalOpen, setIsPasteModalOpen] = useState(false);
+  const [pastedMarkdown, setPastedMarkdown] = useState("");
+  const editorRef = useRef<PageEditorHandle | null>(null);
 
   const isDirty =
     title !== savedTitle ||
@@ -185,9 +188,29 @@ export function EditablePageForm({
     [],
   );
 
+  const applyPastedMarkdown = useCallback(
+    (mode: "insert" | "replace") => {
+      const normalizedMarkdown = pastedMarkdown.trim();
+
+      if (!normalizedMarkdown) {
+        return;
+      }
+
+      if (mode === "insert") {
+        editorRef.current?.insertMarkdown(normalizedMarkdown);
+      } else {
+        editorRef.current?.replaceMarkdown(normalizedMarkdown);
+      }
+
+      setPastedMarkdown("");
+      setIsPasteModalOpen(false);
+    },
+    [pastedMarkdown],
+  );
+
   return (
     <form
-      className="flex h-full min-h-0 flex-col"
+      className="relative flex h-full min-h-0 flex-col"
       onSubmit={(event) => {
         event.preventDefault();
         void persistDraft("manual");
@@ -205,6 +228,13 @@ export function EditablePageForm({
             />
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsPasteModalOpen(true)}
+              className="shrink-0 rounded-full border border-stone-200 bg-white px-3 py-1 text-[10px] font-medium text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
+            >
+              Paste Markdown
+            </button>
             <div className="shrink-0 rounded-full bg-stone-100 px-3 py-1 text-[10px] font-medium text-stone-600">
               {getSaveStatusLabel(saveState, lastSavedAt)}
             </div>
@@ -223,10 +253,63 @@ export function EditablePageForm({
       </section>
 
       <PageEditor
+        ref={editorRef}
         initialEditorDocJson={initialEditorDocJson}
         initialMarkdown={initialMarkdown}
         onChange={handleEditorChange}
       />
+
+      {isPasteModalOpen ? (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-stone-950/35 p-6">
+          <div className="w-full max-w-2xl rounded-2xl border border-stone-200 bg-white shadow-2xl">
+            <div className="border-b border-stone-200 px-5 py-4">
+              <h2 className="text-lg font-semibold text-stone-950">Paste Markdown</h2>
+              <p className="mt-1 text-sm text-stone-600">
+                Insert markdown at the current cursor position or replace the entire body.
+              </p>
+            </div>
+            <div className="px-5 py-4">
+              <textarea
+                autoFocus
+                value={pastedMarkdown}
+                onChange={(event) => setPastedMarkdown(event.target.value)}
+                placeholder="Paste raw markdown here..."
+                className="h-72 w-full rounded-xl border border-stone-200 px-4 py-3 font-mono text-sm leading-6 text-stone-800 outline-none transition focus:border-stone-400"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-3 border-t border-stone-200 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPasteModalOpen(false);
+                  setPastedMarkdown("");
+                }}
+                className="rounded-xl border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
+              >
+                Cancel
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={!pastedMarkdown.trim()}
+                  onClick={() => applyPastedMarkdown("insert")}
+                  className="rounded-xl border border-stone-200 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 disabled:cursor-not-allowed disabled:bg-stone-100 disabled:text-stone-400"
+                >
+                  Insert at cursor
+                </button>
+                <button
+                  type="button"
+                  disabled={!pastedMarkdown.trim()}
+                  onClick={() => applyPastedMarkdown("replace")}
+                  className="rounded-xl bg-stone-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+                >
+                  Replace body
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </form>
   );
 }

@@ -1,6 +1,12 @@
 "use client";
 
-import { type ReactNode, useEffect, useState } from "react";
+import {
+  type ReactNode,
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useState,
+} from "react";
 
 import { BlockPlaceholderPlugin } from "@platejs/utils/react";
 import {
@@ -12,6 +18,7 @@ import {
   H1Plugin,
   H2Plugin,
   H3Plugin,
+  HorizontalRulePlugin,
   HighlightPlugin,
   ItalicPlugin,
   KbdPlugin,
@@ -21,6 +28,8 @@ import {
 import { CodeBlockPlugin } from "@platejs/code-block/react";
 import { DndPlugin } from "@platejs/dnd";
 import { IndentPlugin, useIndentButton, useOutdentButton } from "@platejs/indent/react";
+import { LinkPlugin } from "@platejs/link/react";
+import { upsertLink } from "@platejs/link";
 import { ListPlugin, useListToolbarButton, useListToolbarButtonState } from "@platejs/list/react";
 import { MarkdownPlugin, markdownToSlateNodes, serializeMd } from "@platejs/markdown";
 import { BlockSelectionPlugin } from "@platejs/selection/react";
@@ -35,10 +44,12 @@ import {
   IndentIncrease,
   Italic,
   Keyboard,
+  Link2,
   List,
   ListOrdered,
   Pilcrow,
   Quote,
+  SeparatorHorizontal,
   SquareCode,
   Strikethrough,
   Underline,
@@ -71,6 +82,11 @@ type PageEditorProps = {
   }) => void;
 };
 
+export type PageEditorHandle = {
+  insertMarkdown: (markdown: string) => void;
+  replaceMarkdown: (markdown: string) => void;
+};
+
 const EMPTY_VALUE = [{ type: "p", children: [{ text: "" }] }];
 const EDITOR_PLUGINS = [
   BasicBlocksPlugin,
@@ -78,6 +94,12 @@ const EDITOR_PLUGINS = [
   ListPlugin,
   IndentPlugin,
   CodeBlockPlugin,
+  LinkPlugin,
+  HorizontalRulePlugin.configure({
+    render: {
+      node: HorizontalRuleElement,
+    },
+  }),
   MarkdownPlugin,
   BlockPlaceholderPlugin.configure({
     options: {
@@ -133,10 +155,10 @@ function getInitialValue(initialMarkdown: string) {
   );
 }
 
-export function PageEditor({
+export const PageEditor = forwardRef<PageEditorHandle, PageEditorProps>(function PageEditor({
   initialMarkdown,
   onChange,
-}: PageEditorProps) {
+}, ref) {
   const [initialValue] = useState(() =>
     normalizeNodeId(getInitialValue(initialMarkdown)),
   );
@@ -146,6 +168,32 @@ export function PageEditor({
     plugins: EDITOR_PLUGINS,
     value: initialValue,
   });
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      insertMarkdown: (markdown: string) => {
+        if (!editor || !markdown.trim()) {
+          return;
+        }
+
+        const nodes = getInitialValue(markdown);
+        editor.tf.insertNodes(nodes);
+      },
+      replaceMarkdown: (markdown: string) => {
+        if (!editor) {
+          return;
+        }
+
+        const nodes = getInitialValue(markdown);
+        editor.tf.replaceNodes(nodes, {
+          at: [],
+          children: true,
+        });
+      },
+    }),
+    [editor],
+  );
 
   useEffect(() => {
     onChange({
@@ -178,11 +226,22 @@ export function PageEditor({
         <EditorContainer className="flex min-h-0 flex-1 flex-col overflow-hidden  bg-white shadow-[0_24px_80px_-48px_rgba(28,25,23,0.55)]">
           <Toolbar />
           <Editor
-            className="min-h-0 flex-1 overflow-y-auto text-base leading-8 text-stone-800 [&_[data-slate-node='element']]:my-3 [&_[data-slate-node='text']]:leading-8 [&_blockquote]:border-l-4 [&_blockquote]:border-amber-300 [&_blockquote]:bg-amber-50/70 [&_blockquote]:px-5 [&_blockquote]:py-3 [&_blockquote]:italic [&_code]:rounded-md [&_code]:bg-stone-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_h1]:mt-8 [&_h1]:text-5xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h2]:mt-7 [&_h2]:text-3xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_h3]:mt-6 [&_h3]:text-2xl [&_h3]:font-semibold [&_li>p]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_pre]:overflow-x-auto [&_pre]:rounded-2xl [&_pre]:bg-stone-950 [&_pre]:p-5 [&_pre]:text-[0.95rem] [&_pre]:leading-7 [&_pre]:text-stone-100 [&_strong]:font-semibold [&_u]:decoration-2 [&_ul]:list-disc [&_ul]:pl-6"
+            className="min-h-0 flex-1 overflow-y-auto text-base leading-8 text-stone-800 [&_[data-slate-node='element']]:my-3 [&_[data-slate-node='text']]:leading-8 [&_a]:text-sky-700 [&_a]:underline [&_a]:decoration-sky-300 [&_blockquote]:border-l-4 [&_blockquote]:border-amber-300 [&_blockquote]:bg-amber-50/70 [&_blockquote]:px-5 [&_blockquote]:py-3 [&_blockquote]:italic [&_code]:rounded-md [&_code]:bg-stone-100 [&_code]:px-1.5 [&_code]:py-0.5 [&_h1]:mt-8 [&_h1]:text-5xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h2]:mt-7 [&_h2]:text-3xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_h3]:mt-6 [&_h3]:text-2xl [&_h3]:font-semibold [&_li>p]:my-0 [&_ol]:list-decimal [&_ol]:pl-6 [&_pre]:overflow-x-auto [&_pre]:rounded-2xl [&_pre]:bg-stone-950 [&_pre]:p-5 [&_pre]:text-[0.95rem] [&_pre]:leading-7 [&_pre]:text-stone-100 [&_strong]:font-semibold [&_u]:decoration-2 [&_ul]:list-disc [&_ul]:pl-6"
             placeholder="Write here..."
           />
         </EditorContainer>
       </Plate>
+    </div>
+  );
+});
+
+function HorizontalRuleElement({ attributes, children }: PlateElementProps) {
+  return (
+    <div {...attributes}>
+      <div contentEditable={false} className="my-6">
+        <hr className="border-0 border-t border-stone-300" />
+      </div>
+      {children}
     </div>
   );
 }
@@ -252,6 +311,20 @@ function Toolbar() {
           <ListButton label="Numbered list" nodeType="decimal">
             <ListOrdered className="h-4 w-4" />
           </ListButton>
+          <ToolbarButton label="Link" onClick={() => promptForLink(editor)}>
+            <Link2 className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            label="Horizontal rule"
+            onClick={() =>
+              editor.tf.insertNodes({
+                type: HorizontalRulePlugin.key,
+                children: [{ text: "" }],
+              })
+            }
+          >
+            <SeparatorHorizontal className="h-4 w-4" />
+          </ToolbarButton>
           <ToolbarButton
             label="Code block"
             onClick={() => editor.tf.toggleBlock("code_block")}
@@ -271,6 +344,19 @@ function Toolbar() {
       </div>
     </div>
   );
+}
+
+function promptForLink(editor: ReturnType<typeof useEditorRef>) {
+  const url = window.prompt("Enter link URL");
+
+  if (!url) {
+    return;
+  }
+
+  upsertLink(editor, {
+    text: editor.api.string(editor.selection) || url,
+    url,
+  });
 }
 
 function ToolbarGroup({

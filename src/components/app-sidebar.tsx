@@ -391,7 +391,7 @@ export function AppSidebar({
 
   return (
     <DndProvider backend={HTML5Backend}>
-      <aside className="flex h-full min-h-0 min-w-0 flex-col border-r border-stone-200 bg-[#f7f5ef]">
+      <aside className="flex h-full min-h-0 min-w-0 flex-col border-r border-stone-200 bg-white/90 ">
         {/* <div className="border-b border-stone-200 ">
           <div className="bg-white/90 px-3 py-3 ">
           <div>
