@@ -11,7 +11,6 @@ import {
   Copy,
   FilePlus2,
   FolderTree,
-  GripVertical,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -416,8 +415,8 @@ export function AppSidebar({
           </div>
         </div>
 
-        <ScrollArea className="min-h-0 min-w-0 flex-1">
-          <div className="min-w-0 space-y-3 ">
+        <ScrollArea className="min-h-0 min-w-0 flex flex-col flex-1 overflow-hidden ">
+          <div className="min-w-0 flex flex-col w-full overflow-hidden ">
             {workspaceTrees.map(({ workspace, pages }) => {
               const workspaceKey = getWorkspaceExpansionKey(workspace.id);
               const isExpanded = expandedKeys[workspaceKey] ?? true;
@@ -428,7 +427,7 @@ export function AppSidebar({
                   onOpenChange={(open) => setExpanded(workspaceKey, open)}
                   open={isExpanded}
                 >
-                  <section className="w-full min-w-0  bg-white/90 p-2 ">
+                  <section className="w-full h-full min-w-0 flex-1 bg-white/90 p-2 border-b-1 border-stone-200 ">
                     <div className="flex min-w-0 items-center gap-2 px-1 py-1 overflow-hidden">
                       <CollapsibleTrigger asChild>
                         <button
@@ -714,34 +713,28 @@ function SidebarPageNode({
                 </CollapsibleTrigger>
               ) : (
                 <>
-                                {/* <span className="inline-flex h-7 w-7 items-center justify-center">
+                                <span className="inline-flex h-7 w-7 items-center justify-center">
                   <FolderTree
                     className={cn(
                       "h-3.5 w-3.5",
                       isSelected ? "text-stone-200" : "text-stone-300",
                     )}
                   />
-                </span> */}
+                </span>
                 </>
 
               )}
 
-              <span
-                className={cn(
-                  "inline-flex h-7 w-5 items-center justify-center",
-                  isSelected ? "text-stone-200" : "text-stone-300 group-hover:text-stone-500",
-                )}
-              >
-                <GripVertical className="h-3.5 w-3.5" />
-              </span>
             </div>
 
             <Link
-              className="min-w-0 flex-1 py-2 text-sm"
+              className="min-w-0 flex-1 overflow-hidden py-2 text-sm"
               href={pageHref(node.id)}
               prefetch
             >
-              <span className="truncate block">{node.title}</span>
+              <span className="block max-w-36 truncate whitespace-nowrap">
+                {node.title}
+              </span>
             </Link>
 
             {/* <span
@@ -857,7 +850,7 @@ function PageActionMenu({
           Rename
         </DropdownMenuItem>
         <DropdownMenuItem disabled={!node.canWrite} onSelect={() => void onMoveToRoot(node)}>
-          <GripVertical className="h-4 w-4" />
+          <FolderTree className="h-4 w-4" />
           Move to workspace root
         </DropdownMenuItem>
         <DropdownMenuSeparator />
