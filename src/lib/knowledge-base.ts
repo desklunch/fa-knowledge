@@ -148,22 +148,28 @@ async function getSnapshot(): Promise<KnowledgeBaseSnapshot> {
     return fallbackStore;
   }
 
-  const [userRows, workspaceRows, pageRows, revisionRows] = await Promise.all([
-    db.select().from(users).orderBy(desc(users.permissionLevel), asc(users.name)),
-    db.select().from(workspaces).orderBy(asc(workspaces.type), asc(workspaces.name)),
-    db.select().from(pages).orderBy(asc(pages.path), asc(pages.sortOrder)),
-    db
-      .select()
-      .from(pageRevisions)
-      .orderBy(desc(pageRevisions.revisionNumber), desc(pageRevisions.createdAt)),
-  ]);
+  try {
+    const [userRows, workspaceRows, pageRows, revisionRows] = await Promise.all([
+      db.select().from(users).orderBy(desc(users.permissionLevel), asc(users.name)),
+      db.select().from(workspaces).orderBy(asc(workspaces.type), asc(workspaces.name)),
+      db.select().from(pages).orderBy(asc(pages.path), asc(pages.sortOrder)),
+      db
+        .select()
+        .from(pageRevisions)
+        .orderBy(desc(pageRevisions.revisionNumber), desc(pageRevisions.createdAt)),
+    ]);
 
-  return {
-    users: userRows,
-    workspaces: workspaceRows,
-    pages: pageRows,
-    revisions: revisionRows,
-  };
+    return {
+      users: userRows,
+      workspaces: workspaceRows,
+      pages: pageRows,
+      revisions: revisionRows,
+    };
+  } catch (error) {
+    console.error("Failed to load knowledge base snapshot from database.", error);
+
+    return fallbackStore;
+  }
 }
 
 function getFallbackUser(userRows: User[]) {

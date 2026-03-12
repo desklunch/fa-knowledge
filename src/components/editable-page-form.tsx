@@ -98,7 +98,8 @@ export function EditablePageForm({
           throw new Error(payload.error ?? "Failed to save page.");
         }
 
-        setSavedTitle(title);
+        setTitle(payload.page.title);
+        setSavedTitle(payload.page.title);
         setSavedContentMarkdown(contentMarkdown);
         setSavedEditorDocJson(editorDocJson);
         setRevisionId(payload.page.currentRevisionId);
@@ -106,7 +107,7 @@ export function EditablePageForm({
         setLastSavedAt(new Date());
         setSaveState("saved");
 
-        if (reason === "manual" || (reason === "autosave" && titleChanged)) {
+        if (reason === "manual" || titleChanged) {
           router.refresh();
         }
       } catch (error) {

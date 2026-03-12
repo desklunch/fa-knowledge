@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  File,
   FilePlus2,
   FolderTree,
   MoreHorizontal,
@@ -685,7 +686,7 @@ function SidebarPageNode({
         >
           <div
             className={cn(
-              "group flex w-full min-w-0 items-center gap-1 rounded-xl pr-1 transition",
+              "group flex w-full min-w-0 items-center gap-0 rounded-xl pr-1 transition",
               node.canWrite ? "cursor-grab active:cursor-grabbing" : "cursor-default",
               isSelected ? "bg-stone-900 text-white" : "text-stone-700 hover:bg-stone-100",
               isDragging && "opacity-50",
@@ -713,8 +714,8 @@ function SidebarPageNode({
                 </CollapsibleTrigger>
               ) : (
                 <>
-                                <span className="inline-flex h-7 w-7 items-center justify-center">
-                  <FolderTree
+                  <span className="inline-flex h-7 w-7 items-center justify-center">
+                  <File
                     className={cn(
                       "h-3.5 w-3.5",
                       isSelected ? "text-stone-200" : "text-stone-300",
