@@ -63,10 +63,6 @@ export function EditablePageForm({
       }
 
       const titleChanged = title !== savedTitle;
-      const contentChanged =
-        contentMarkdown !== savedContentMarkdown ||
-        editorDocJson !== savedEditorDocJson;
-
       setSaveState("saving");
       setSaveError(null);
 
@@ -110,7 +106,7 @@ export function EditablePageForm({
         setLastSavedAt(new Date());
         setSaveState("saved");
 
-        if (reason === "manual" || (reason === "autosave" && titleChanged && !contentChanged)) {
+        if (reason === "manual" || (reason === "autosave" && titleChanged)) {
           router.refresh();
         }
       } catch (error) {
@@ -125,8 +121,6 @@ export function EditablePageForm({
       pageId,
       revisionId,
       router,
-      savedContentMarkdown,
-      savedEditorDocJson,
       savedTitle,
       saveState,
       title,

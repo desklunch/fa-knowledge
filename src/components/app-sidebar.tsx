@@ -12,12 +12,10 @@ import {
   FilePlus2,
   FolderTree,
   GripVertical,
-  Lock,
   MoreHorizontal,
   Pencil,
   Plus,
   Settings2,
-  Share2,
   Trash2,
 } from "lucide-react";
 
@@ -662,16 +660,11 @@ function SidebarPageNode({
     (element: HTMLDivElement | null) => {
       rowRef.current = element;
       dropRef(element);
-    },
-    [dropRef],
-  );
-  const setDragHandleNode = useCallback(
-    (element: HTMLSpanElement | null) => {
       if (node.canWrite) {
         dragRef(element);
       }
     },
-    [dragRef, node.canWrite],
+    [dragRef, dropRef, node.canWrite],
   );
 
   const activeDropPosition = isOver && canDrop ? hoverPosition : null;
@@ -694,6 +687,7 @@ function SidebarPageNode({
           <div
             className={cn(
               "group flex w-full min-w-0 items-center gap-1 rounded-xl pr-1 transition",
+              node.canWrite ? "cursor-grab active:cursor-grabbing" : "cursor-default",
               isSelected ? "bg-stone-900 text-white" : "text-stone-700 hover:bg-stone-100",
               isDragging && "opacity-50",
             )}
@@ -719,23 +713,24 @@ function SidebarPageNode({
                   </button>
                 </CollapsibleTrigger>
               ) : (
-                <span className="inline-flex h-7 w-7 items-center justify-center">
+                <>
+                                {/* <span className="inline-flex h-7 w-7 items-center justify-center">
                   <FolderTree
                     className={cn(
                       "h-3.5 w-3.5",
                       isSelected ? "text-stone-200" : "text-stone-300",
                     )}
                   />
-                </span>
+                </span> */}
+                </>
+
               )}
 
               <span
                 className={cn(
                   "inline-flex h-7 w-5 items-center justify-center",
-                  node.canWrite ? "cursor-grab" : "cursor-default",
                   isSelected ? "text-stone-200" : "text-stone-300 group-hover:text-stone-500",
                 )}
-                ref={setDragHandleNode}
               >
                 <GripVertical className="h-3.5 w-3.5" />
               </span>
