@@ -2,9 +2,10 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { EditablePageForm } from "@/components/editable-page-form";
 import { RightSidebar } from "@/components/right-sidebar";
 import { UserSwitcher } from "@/components/user-switcher";
-import { getKnowledgeBaseView } from "@/lib/knowledge-base";
+import { flatten, getKnowledgeBaseView } from "@/lib/knowledge-base";
 import { getImpersonatedUserId } from "@/lib/impersonation";
 import { TreePalm } from "lucide-react";
+import React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -40,6 +41,22 @@ export default async function Home({ searchParams }: HomeProps) {
     ? visibleWorkspaces.find(({ workspace }) => workspace.id === selectedPage.workspaceId)?.workspace ??
       null
     : null;
+  const currentWorkspacePages = selectedPage
+    ? visibleWorkspaces.find(({ workspace }) => workspace.id === selectedPage.workspaceId)?.pages ?? []
+    : [];
+  const internalLinkTargets = flatten(currentWorkspacePages)
+    .filter((page) => page.id !== selectedPage?.id)
+    .map((page) => ({
+      depth: page.depth,
+      href: `/?page=${page.id}`,
+      pageId: page.id,
+      title: page.title,
+    }));
+  const mentionUsers = availableUsers.map((user) => ({
+    id: user.id,
+    name: user.name,
+  }));
+
   return (
     <main className="h-screen overflow-hidden bg-[#f3f1ea] text-stone-900">
       <header className="border-b border-stone-200 bg-white/95 backdrop-blur">
@@ -98,6 +115,8 @@ export default async function Home({ searchParams }: HomeProps) {
                   <EditablePageForm
                     key={`form-${selectedPage.id}-${selectedRevision.id}`}
                     currentRevisionId={selectedRevision.id}
+                    internalLinkTargets={internalLinkTargets}
+                    mentionUsers={mentionUsers}
                     pageId={selectedPage.id}
                     initialTitle={selectedDraft?.title ?? selectedPage.title}
                     initialEditorDocJson={
@@ -127,51 +146,124 @@ export default async function Home({ searchParams }: HomeProps) {
                           remarkPlugins={[remarkGfm]}
                           components={{
                             h1: ({ children }) => (
-                              <h1 className="mt-6 text-4xl font-semibold tracking-tight text-stone-950 first:mt-0">
+                              <h1 className="relative mb-1 mt-[1.6em] pb-1 text-5xl font-semibold tracking-tight text-stone-950 first:mt-0">
                                 {children}
                               </h1>
                             ),
                             h2: ({ children }) => (
-                              <h2 className="mt-6 text-3xl font-semibold tracking-tight text-stone-950 first:mt-0">
+                              <h2 className="relative mb-1 mt-[1.35em] pb-px text-3xl font-semibold tracking-tight text-stone-950 first:mt-0">
                                 {children}
                               </h2>
                             ),
                             h3: ({ children }) => (
-                              <h3 className="mt-5 text-2xl font-semibold tracking-tight text-stone-950 first:mt-0">
+                              <h3 className="relative mb-1 mt-[1em] pb-px text-2xl font-semibold tracking-tight text-stone-950 first:mt-0">
                                 {children}
                               </h3>
                             ),
                             p: ({ children }) => (
-                              <p className="mt-4 text-base leading-8 text-stone-700 first:mt-0">
+                              <p className="m-0 px-0 py-1 text-base leading-8 text-stone-700">
                                 {children}
                               </p>
                             ),
                             ul: ({ children }) => (
-                              <ul className="mt-4 list-disc space-y-2 pl-6 text-base leading-8 text-stone-700">
+                              <ul className="m-0 list-disc pl-6 text-base leading-8 text-stone-700 [&>li]:py-1 [&>li]:pl-1">
                                 {children}
                               </ul>
                             ),
                             ol: ({ children }) => (
-                              <ol className="mt-4 list-decimal space-y-2 pl-6 text-base leading-8 text-stone-700">
+                              <ol className="m-0 list-decimal pl-6 text-base leading-8 text-stone-700 [&>li]:py-1 [&>li]:pl-1">
                                 {children}
                               </ol>
                             ),
+                            li: ({ children }) => {
+                              const isTask =
+                                Array.isArray(children) &&
+                                children.some(
+                                  (child) =>
+                                    React.isValidElement(child) &&
+                                    child.type === "input",
+                                );
+
+                              return (
+                                <li
+                                  className={
+                                    isTask ? "relative min-h-8 list-none py-1 pl-0" : undefined
+                                  }
+                                >
+                                  {children}
+                                </li>
+                              );
+                            },
+                            input: ({ checked, type }) => {
+                              if (type !== "checkbox") {
+                                return null;
+                              }
+
+                              return (
+                                <input
+                                  checked={checked}
+                                  className="-ml-7 mr-3 inline-block size-4 rounded border border-stone-300 bg-white align-middle accent-stone-900 shadow-sm"
+                                  disabled
+                                  readOnly
+                                  type="checkbox"
+                                />
+                              );
+                            },
                             blockquote: ({ children }) => (
-                              <blockquote className="mt-4 border-l-4 border-stone-300 pl-4 italic text-stone-600">
+                              <blockquote className="my-3 border-l-4 border-amber-300 bg-amber-50/70 px-5 py-3 italic text-stone-700">
                                 {children}
                               </blockquote>
+                            ),
+                            hr: () => (
+                              <div className="py-6">
+                                <hr className="h-0.5 rounded-sm border-none bg-stone-200 bg-clip-content" />
+                              </div>
                             ),
                             code: ({ children, className }) => {
                               const isBlock = Boolean(className);
 
                               return isBlock ? (
-                                <code className="block overflow-x-auto rounded-xl bg-stone-950 px-4 py-3 text-sm text-stone-100">
+                                <code className="block overflow-x-auto rounded-2xl bg-stone-950 px-4 py-3 font-mono text-sm leading-[1.65] text-stone-100">
                                   {children}
                                 </code>
                               ) : (
-                                <code className="rounded bg-stone-100 px-1.5 py-0.5 text-sm text-stone-900">
+                                <code className="whitespace-pre-wrap rounded-md bg-stone-100 px-[0.3em] py-[0.2em] font-mono text-sm text-stone-900">
                                   {children}
                                 </code>
+                              );
+                            },
+                            a: ({ children, href }) => {
+                              if (href?.startsWith("mention:")) {
+                                const mentionId = decodeURIComponent(href.slice("mention:".length));
+                                const isPageMention = mentionId.startsWith("/");
+
+                                if (isPageMention) {
+                                  return (
+                                    <a
+                                      href={`/?page=${mentionId.slice(1)}`}
+                                      className="inline-flex items-center rounded-md bg-stone-100 px-1.5 py-0.5 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-200"
+                                    >
+                                      {children}
+                                    </a>
+                                  );
+                                }
+
+                                return (
+                                  <span className="inline-flex items-center rounded-md bg-stone-100 px-1.5 py-0.5 text-sm font-medium text-stone-700">
+                                    {children}
+                                  </span>
+                                );
+                              }
+
+                              return (
+                                <a
+                                  href={href}
+                                  className="font-medium text-sky-700 underline decoration-sky-700/35 underline-offset-4 transition-colors hover:text-sky-800"
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {children}
+                                </a>
                               );
                             },
                             pre: ({ children }) => <div className="mt-4">{children}</div>,
