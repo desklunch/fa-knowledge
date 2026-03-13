@@ -19,6 +19,10 @@ import {
   Trash2,
 } from "lucide-react";
 
+import {
+  CommandPalette,
+  type CommandPalettePageItem,
+} from "@/components/command-palette";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -54,6 +58,7 @@ type AppSidebarProps = {
     permissionLevel: number;
     userType: string;
   };
+  searchItems: CommandPalettePageItem[];
   selectedPageId: string | null;
   visibleWorkspaces: WorkspaceTree[];
 };
@@ -75,6 +80,7 @@ const STORAGE_KEY = "fa-knowledge-sidebar-expanded";
 
 export function AppSidebar({
   currentUser,
+  searchItems,
   selectedPageId,
   visibleWorkspaces,
 }: AppSidebarProps) {
@@ -83,6 +89,7 @@ export function AppSidebar({
   const searchParams = useSearchParams();
   const [workspaceTrees, setWorkspaceTrees] = useState(visibleWorkspaces);
   const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({});
+  const [editingPageId, setEditingPageId] = useState<string | null>(null);
   const [, setStatus] = useState<{ kind: "error" | "success"; message: string } | null>(
     null,
   );
@@ -136,6 +143,18 @@ export function AppSidebar({
       router.refresh();
     });
   };
+
+  const navigateToHref = (href: string) => {
+    router.push(href);
+  };
+
+  const personalWorkspace = visibleWorkspaces.find(
+    ({ workspace }) =>
+      workspace.type === "private" && workspace.ownerUserId === currentUser.id,
+  )?.workspace;
+  const sharedWorkspace = visibleWorkspaces.find(
+    ({ workspace }) => workspace.type === "shared",
+  )?.workspace;
 
   const setExpanded = (key: string, value: boolean) => {
     setExpandedKeys((current) => ({
@@ -230,9 +249,7 @@ export function AppSidebar({
     refreshData();
   };
 
-  const handleRenamePage = async (node: VisiblePageNode) => {
-    const nextTitle = window.prompt("Rename page", node.title)?.trim();
-
+  const handleRenamePage = async (node: VisiblePageNode, nextTitle: string) => {
     if (!nextTitle || nextTitle === node.title) {
       return;
     }
@@ -415,7 +432,37 @@ export function AppSidebar({
             ) : null}
           </div>
         </div> */}
-
+        <div className="border-b border-stone-200 px-3 py-3">
+          <CommandPalette
+            currentWorkspaceOptions={{
+              personal: personalWorkspace
+                ? {
+                    id: personalWorkspace.id,
+                    label: "Personal",
+                    workspaceType: "private",
+                  }
+                : null,
+              shared: sharedWorkspace
+                ? {
+                    id: sharedWorkspace.id,
+                    label: "Shared",
+                    workspaceType: "shared",
+                  }
+                : null,
+            }}
+            items={searchItems}
+            onCreatePage={async ({ title, workspaceId, workspaceType }) => {
+              await handleCreatePage({
+                workspaceId,
+                parentPageId: null,
+                title,
+                workspaceType,
+              });
+            }}
+            onNavigate={navigateToHref}
+            selectedPageId={selectedPageId}
+          />
+        </div>
         <ScrollArea className="min-h-0 min-w-0 flex flex-col flex-1 overflow-hidden ">
           <div className="min-w-0 flex flex-col w-full overflow-hidden ">
             {workspaceTrees.map(({ workspace, pages }) => {
@@ -515,7 +562,10 @@ export function AppSidebar({
                               onMove={handleMovePage}
                               onMoveToRoot={handleMoveToRoot}
                               onRename={handleRenamePage}
+                              onStartRename={(pageId) => setEditingPageId(pageId)}
+                              onStopRename={() => setEditingPageId(null)}
                               pageHref={pageHref}
+                              editingPageId={editingPageId}
                               selectedPageId={selectedPageId}
                               setExpanded={setExpanded}
                               siblingNodes={pages}
@@ -547,6 +597,7 @@ export function AppSidebar({
 
 function SidebarPageNode({
   depth,
+  editingPageId,
   expandedKeys,
   node,
   onCopyLink,
@@ -556,6 +607,8 @@ function SidebarPageNode({
   onMove,
   onMoveToRoot,
   onRename,
+  onStartRename,
+  onStopRename,
   pageHref,
   selectedPageId,
   setExpanded,
@@ -563,6 +616,7 @@ function SidebarPageNode({
   workspaceId,
 }: {
   depth: number;
+  editingPageId: string | null;
   expandedKeys: Record<string, boolean>;
   node: VisiblePageNode;
   onCopyLink: (pageId: string) => Promise<void>;
@@ -571,7 +625,9 @@ function SidebarPageNode({
   onDuplicate: (node: VisiblePageNode) => Promise<void>;
   onMove: (workspaceId: string, pageId: string, target: MoveTarget) => Promise<void>;
   onMoveToRoot: (node: VisiblePageNode) => Promise<void>;
-  onRename: (node: VisiblePageNode) => Promise<void>;
+  onRename: (node: VisiblePageNode, nextTitle: string) => Promise<void>;
+  onStartRename: (pageId: string) => void;
+  onStopRename: () => void;
   pageHref: (pageId: string) => string;
   selectedPageId: string | null;
   setExpanded: (key: string, value: boolean) => void;
@@ -581,9 +637,30 @@ function SidebarPageNode({
   const isExpanded = expandedKeys[getPageExpansionKey(node.id)] ?? true;
   const hasChildren = node.children.length > 0;
   const isSelected = selectedPageId === node.id;
+  const isEditing = editingPageId === node.id;
   const rowRef = useRef<HTMLDivElement | null>(null);
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const renameSubmissionRef = useRef(false);
   const expandTimeoutRef = useRef<number | null>(null);
   const [hoverPosition, setHoverPosition] = useState<DropPosition | null>(null);
+  const [draftTitle, setDraftTitle] = useState(node.title);
+
+  useEffect(() => {
+    if (!isEditing) {
+      setDraftTitle(node.title);
+      renameSubmissionRef.current = false;
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isEditing, node.title]);
   const [{ isDragging }, dragRef] = useDrag(
     () => ({
       canDrag: node.canWrite,
@@ -671,6 +748,28 @@ function SidebarPageNode({
 
   const activeDropPosition = isOver && canDrop ? hoverPosition : null;
 
+  const commitRename = async () => {
+    if (renameSubmissionRef.current) {
+      return;
+    }
+
+    renameSubmissionRef.current = true;
+    const nextTitle = draftTitle.trim();
+
+    if (!nextTitle || nextTitle === node.title) {
+      onStopRename();
+      renameSubmissionRef.current = false;
+      return;
+    }
+
+    try {
+      await onRename(node, nextTitle);
+      onStopRename();
+    } finally {
+      renameSubmissionRef.current = false;
+    }
+  };
+
   return (
     <Collapsible
       onOpenChange={(open) => setExpanded(getPageExpansionKey(node.id), open)}
@@ -730,15 +829,41 @@ function SidebarPageNode({
 
             </div>
 
-            <Link
-              className="min-w-0 flex-1 overflow-hidden py-2 text-sm"
-              href={pageHref(node.id)}
-              prefetch
-            >
-              <span className="block max-w-36 truncate whitespace-nowrap">
-                {node.title}
-              </span>
-            </Link>
+            {isEditing ? (
+              <input
+                className={cn(
+                  "min-w-0 flex-1 rounded-md border border-stone-300 bg-white px-2 py-1 text-sm outline-none ring-0",
+                  isSelected && "border-white/30 bg-white text-stone-950",
+                )}
+                onBlur={() => void commitRename()}
+                onChange={(event) => setDraftTitle(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void commitRename();
+                    return;
+                  }
+
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setDraftTitle(node.title);
+                    onStopRename();
+                  }
+                }}
+                ref={renameInputRef}
+                value={draftTitle}
+              />
+            ) : (
+              <Link
+                className="min-w-0 flex-1 overflow-hidden py-2 text-sm"
+                href={pageHref(node.id)}
+                prefetch
+              >
+                <span className="block max-w-36 truncate whitespace-nowrap">
+                  {node.title}
+                </span>
+              </Link>
+            )}
 
             {/* <span
               className={cn(
@@ -756,7 +881,7 @@ function SidebarPageNode({
               onDelete={onDelete}
               onDuplicate={onDuplicate}
               onMoveToRoot={onMoveToRoot}
-              onRename={onRename}
+              onRename={() => onStartRename(node.id)}
               selected={isSelected}
             />
           </div>
@@ -778,7 +903,10 @@ function SidebarPageNode({
               onMove={onMove}
               onMoveToRoot={onMoveToRoot}
               onRename={onRename}
+              onStartRename={onStartRename}
+              onStopRename={onStopRename}
               pageHref={pageHref}
+              editingPageId={editingPageId}
               selectedPageId={selectedPageId}
               setExpanded={setExpanded}
               siblingNodes={node.children}
@@ -809,7 +937,7 @@ function PageActionMenu({
   onDelete: (node: VisiblePageNode) => Promise<void>;
   onDuplicate: (node: VisiblePageNode) => Promise<void>;
   onMoveToRoot: (node: VisiblePageNode) => Promise<void>;
-  onRename: (node: VisiblePageNode) => Promise<void>;
+  onRename: () => void;
   selected: boolean;
 }) {
   return (
@@ -849,7 +977,12 @@ function PageActionMenu({
           <FilePlus2 className="h-4 w-4" />
           New child
         </DropdownMenuItem>
-        <DropdownMenuItem disabled={!node.canWrite} onSelect={() => void onRename(node)}>
+        <DropdownMenuItem
+          disabled={!node.canWrite}
+          onSelect={() => {
+            onRename();
+          }}
+        >
           <Pencil className="h-4 w-4" />
           Rename
         </DropdownMenuItem>

@@ -71,6 +71,17 @@ export type KnowledgeBaseView = {
   }>;
 };
 
+export type SearchKnowledgeBaseResult = {
+  results: Array<{
+    id: string;
+    title: string;
+    href: string;
+    workspaceLabel: string;
+    workspaceType: "private" | "shared";
+    snippet: string;
+  }>;
+};
+
 export type SavePageInput = {
   actingUserId: string;
   pageId: string;
@@ -291,6 +302,41 @@ function getPageRevisionsFromSnapshot(snapshot: KnowledgeBaseSnapshot, pageId: s
   return snapshot.revisions
     .filter((revision) => revision.pageId === pageId)
     .sort((a, b) => b.revisionNumber - a.revisionNumber);
+}
+
+function stripSearchText(value: string) {
+  return value
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\!\[[^\]]*\]\([^)]+\)/g, " ")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^>\s?/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/^\s*\d+[.)]\s+/gm, "")
+    .replace(/\[\[toc\]\]/gi, "table of contents")
+    .replace(/[*_~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function getSearchSnippet(body: string, query: string) {
+  if (!body) {
+    return "No preview";
+  }
+
+  const matchIndex = body.indexOf(query);
+
+  if (matchIndex === -1) {
+    return body.length > 120 ? `${body.slice(0, 120)}…` : body;
+  }
+
+  const start = Math.max(0, matchIndex - 36);
+  const end = Math.min(body.length, matchIndex + query.length + 72);
+  const snippet = body.slice(start, end).trim();
+
+  return `${start > 0 ? "…" : ""}${snippet}${end < body.length ? "…" : ""}`;
 }
 
 function getLatestEditSessionForPageFromSnapshot(
@@ -873,6 +919,57 @@ export async function getKnowledgeBaseView(input: {
     selectedPageRevisions,
     visibleWorkspaces,
   };
+}
+
+export async function searchKnowledgeBase(input: {
+  userId?: string | null;
+  query: string;
+}): Promise<SearchKnowledgeBaseResult> {
+  const snapshot = await getSnapshot();
+  const currentUser = getCurrentUserFromSnapshot(snapshot, input.userId);
+  const normalizedQuery = input.query.trim().toLowerCase();
+
+  if (!currentUser || normalizedQuery.length < 3) {
+    return { results: [] };
+  }
+
+  const visibleWorkspaces = getVisibleWorkspacesFromSnapshot(snapshot, currentUser);
+  const results = visibleWorkspaces
+    .flatMap(({ workspace, pages }) =>
+      flatten(pages).map((page) => {
+        const title = page.title.toLowerCase();
+        const body = stripSearchText(page.currentContentMarkdown ?? "");
+        let score = 0;
+
+        if (title === normalizedQuery) score += 300;
+        if (title.startsWith(normalizedQuery)) score += 180;
+        if (title.includes(normalizedQuery)) score += 100;
+        if (body.includes(normalizedQuery)) score += 40;
+
+        return {
+          id: page.id,
+          title: page.title,
+          href: `/?page=${page.id}`,
+          workspaceLabel: workspace.type === "private" ? "Personal" : "Shared",
+          workspaceType: workspace.type,
+          snippet: getSearchSnippet(body, normalizedQuery),
+          score,
+        };
+      }),
+    )
+    .filter((result) => result.score > 0)
+    .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title))
+    .slice(0, 20)
+    .map((result) => ({
+      id: result.id,
+      title: result.title,
+      href: result.href,
+      workspaceLabel: result.workspaceLabel,
+      workspaceType: result.workspaceType,
+      snippet: result.snippet,
+    }));
+
+  return { results };
 }
 
 export async function getPageRevisions(input: { actingUserId: string; pageId: string }) {

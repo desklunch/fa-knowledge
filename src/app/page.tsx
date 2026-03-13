@@ -56,6 +56,15 @@ export default async function Home({ searchParams }: HomeProps) {
     id: user.id,
     name: user.name,
   }));
+  const searchItems = visibleWorkspaces.flatMap(({ workspace, pages }) =>
+    flatten(pages).map((page) => ({
+      href: `/?page=${page.id}`,
+      id: page.id,
+      title: page.title,
+      workspaceLabel: workspace.type === "private" ? "Personal" : "Shared",
+      workspaceType: workspace.type,
+    })),
+  );
 
   return (
     <main className="h-screen overflow-hidden bg-[#f3f1ea] text-stone-900">
@@ -91,6 +100,7 @@ export default async function Home({ searchParams }: HomeProps) {
             permissionLevel: currentUser.permissionLevel,
             userType: currentUser.userType,
           }}
+          searchItems={searchItems}
           selectedPageId={selectedPage?.id ?? null}
           visibleWorkspaces={visibleWorkspaces}
         />

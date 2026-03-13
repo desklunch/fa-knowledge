@@ -36,6 +36,10 @@ npm run db:seed
 - Hidden restricted pages omitted from the tree
 - Immutable revision-ready content model with markdown as canonical storage
 
+## Editor Docs
+
+- [Plate Editor Technical Documentation](./docs/plate-editor.md)
+
 ## Next Steps
 
 - Replace demo in-memory reads with real Drizzle queries

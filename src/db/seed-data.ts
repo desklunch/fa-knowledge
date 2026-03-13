@@ -13,7 +13,7 @@ export const seededUsers = [
   },
   {
     id: "10000000-0000-4000-8000-000000000003",
-    name: "Level 3 User",
+    name: "Omar",
     userType: "human" as const,
     permissionLevel: 3,
   },
