@@ -5,9 +5,11 @@ import { and, asc, desc, eq, max } from "drizzle-orm";
 import { db } from "@/db/client";
 import { seededPages, seededRevisions, seededUsers, seededWorkspaces } from "@/db/seed-data";
 import {
+  pageActivityEvents,
   pageEditSessions,
   pageRevisions,
   pages,
+  type PageActivityEvent,
   type PageEditSession,
   type Page,
   type PageRevision,
@@ -25,6 +27,7 @@ export type VisiblePageNode = Page & {
 };
 
 type KnowledgeBaseSnapshot = {
+  activityEvents: PageActivityEvent[];
   users: User[];
   workspaces: Workspace[];
   pages: Page[];
@@ -51,19 +54,35 @@ export type RevisionSummary = {
   titleSnapshot: string;
   createdAt: Date;
   createdByUserId: string;
+  createdByUserName: string;
 };
 
 export type KnowledgeBaseView = {
   availableUsers: User[];
   currentUser: User | null;
+  recentActivity: Array<{
+    actorName: string;
+    createdAt: Date;
+    eventType: "page_created" | "page_edited" | "page_renamed" | "page_moved" | "page_deleted";
+    href: string | null;
+    id: string;
+    message: string;
+    pageId: string | null;
+  }>;
   selectedPageId: string | null;
-  selectedPage: (Page & { canWrite: boolean }) | null;
+  selectedPage: (Page & { canWrite: boolean; hasDescendants: boolean }) | null;
   selectedRevision: PageRevision | null;
   selectedDraft: {
     title: string;
     contentMarkdown: string;
     editorDocJson: unknown;
   } | null;
+  selectedPageBacklinks: Array<{
+    href: string;
+    id: string;
+    title: string;
+    workspaceLabel: string;
+  }>;
   selectedPageRevisions: RevisionSummary[];
   visibleWorkspaces: Array<{
     workspace: Workspace;
@@ -98,6 +117,7 @@ export type UpdatePageMetadataInput = {
   pageId: string;
   explicitReadLevel?: number | null;
   explicitWriteLevel?: number | null;
+  descendantStrategy?: "cascade" | "preserve";
 };
 
 export type CreatePageInput = {
@@ -116,11 +136,16 @@ export type MovePageInput = {
   pageId: string;
   destinationParentPageId: string | null;
   destinationIndex?: number | null;
+  destinationWorkspaceId?: string | null;
+  weakeningStrategy?: "inherit" | "preserve";
+  destinationExplicitReadLevel?: number | null;
+  destinationExplicitWriteLevel?: number | null;
 };
 
 export type DeletePageInput = {
   actingUserId: string;
   pageId: string;
+  mode?: "delete-subtree" | "keep-descendants";
 };
 
 export type SavePageResult = {
@@ -146,6 +171,17 @@ export type UpdatePageMetadataResult = {
   page: Page;
 };
 
+export type RestorePageRevisionInput = {
+  actingUserId: string;
+  pageId: string;
+  revisionId: string;
+};
+
+export type RestorePageRevisionResult = {
+  page: Page;
+  revision: PageRevision;
+};
+
 const MAX_PAGE_DEPTH = 5;
 
 function buildSeedSnapshot(): KnowledgeBaseSnapshot {
@@ -163,6 +199,7 @@ function buildSeedSnapshot(): KnowledgeBaseSnapshot {
   })) as PageRevision[];
 
   return {
+    activityEvents: [],
     users: seededUsers as User[],
     workspaces: seededWorkspaces as Workspace[],
     pages: seededPageRows,
@@ -183,7 +220,7 @@ async function getSnapshot(): Promise<KnowledgeBaseSnapshot> {
   }
 
   try {
-    const [userRows, workspaceRows, pageRows, revisionRows, editSessionRows] = await Promise.all([
+    const [userRows, workspaceRows, pageRows, revisionRows, editSessionRows, activityEventRows] = await Promise.all([
       db.select().from(users).orderBy(desc(users.permissionLevel), asc(users.name)),
       db.select().from(workspaces).orderBy(asc(workspaces.type), asc(workspaces.name)),
       db.select().from(pages).orderBy(asc(pages.path), asc(pages.sortOrder)),
@@ -195,9 +232,14 @@ async function getSnapshot(): Promise<KnowledgeBaseSnapshot> {
         .select()
         .from(pageEditSessions)
         .orderBy(desc(pageEditSessions.updatedAt)),
+      db
+        .select()
+        .from(pageActivityEvents)
+        .orderBy(desc(pageActivityEvents.createdAt)),
     ]);
 
     return {
+      activityEvents: activityEventRows,
       users: userRows,
       workspaces: workspaceRows,
       pages: pageRows,
@@ -304,6 +346,138 @@ function getPageRevisionsFromSnapshot(snapshot: KnowledgeBaseSnapshot, pageId: s
     .sort((a, b) => b.revisionNumber - a.revisionNumber);
 }
 
+function getRecentActivityFromVisibleWorkspaces(
+  snapshot: KnowledgeBaseSnapshot,
+  currentUser: User,
+  visibleWorkspaces: KnowledgeBaseView["visibleWorkspaces"],
+) {
+  const visiblePageMap = new Map(
+    visibleWorkspaces.flatMap(({ workspace, pages }) =>
+      flatten(pages).map((page) => [
+        page.id,
+        {
+          title: page.title,
+          workspaceLabel: workspace.type === "private" ? "Personal" : "Shared",
+        },
+      ]),
+    ),
+  );
+  const sharedWorkspace = snapshot.workspaces.find((workspace) => workspace.type === "shared");
+
+  if (!sharedWorkspace) {
+    return [];
+  }
+
+  return snapshot.activityEvents
+    .filter((event) => event.workspaceId === sharedWorkspace.id)
+    .filter(
+      (event) =>
+        event.effectiveReadLevel === null ||
+        currentUser.permissionLevel >= event.effectiveReadLevel,
+    )
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .slice(0, 50)
+    .map((event) => {
+      const actorName =
+        snapshot.users.find((user) => user.id === event.actorUserId)?.name ?? "Unknown user";
+      const href =
+        event.pageId && visiblePageMap.has(event.pageId) ? `/?page=${event.pageId}` : null;
+
+      return {
+        actorName,
+        createdAt: event.createdAt,
+        eventType: event.eventType,
+        href,
+        id: event.id,
+        message: formatPageActivityMessage(event, actorName),
+        pageId: event.pageId,
+      };
+    });
+}
+
+function formatPageActivityMessage(event: PageActivityEvent, actorName: string) {
+  switch (event.eventType) {
+    case "page_created":
+      return `${actorName} created ${event.pageTitle}`;
+    case "page_edited":
+      return `${actorName} edited ${event.pageTitle} (${event.revisionNumber ?? "?"})`;
+    case "page_renamed":
+      return `${actorName} renamed "${event.previousPageTitle ?? event.pageTitle}" to "${event.pageTitle}"`;
+    case "page_moved":
+      return `${actorName} moved ${event.pageTitle} to ${event.parentPageTitle ?? "root"}`;
+    case "page_deleted":
+      return `${actorName} deleted ${event.pageTitle}`;
+    default:
+      return `${actorName} updated ${event.pageTitle}`;
+  }
+}
+
+function extractReferencedPageIds(contentMarkdown: string | null | undefined) {
+  if (!contentMarkdown) {
+    return new Set<string>();
+  }
+
+  const referencedIds = new Set<string>();
+  const pageUrlMatches = contentMarkdown.matchAll(/[(/?&]page=([0-9a-f-]{36})/gi);
+  const mentionMatches = contentMarkdown.matchAll(/mention:(?:%2F|\/)?([0-9a-f-]{36})/gi);
+
+  for (const match of pageUrlMatches) {
+    if (match[1]) {
+      referencedIds.add(match[1]);
+    }
+  }
+
+  for (const match of mentionMatches) {
+    if (match[1]) {
+      referencedIds.add(match[1]);
+    }
+  }
+
+  return referencedIds;
+}
+
+function getBacklinksFromVisibleWorkspaces(
+  snapshot: KnowledgeBaseSnapshot,
+  currentUser: User,
+  visibleWorkspaces: KnowledgeBaseView["visibleWorkspaces"],
+  selectedPageId: string | null,
+) {
+  if (!selectedPageId) {
+    return [];
+  }
+
+  return visibleWorkspaces
+    .flatMap(({ workspace, pages }) =>
+      flatten(pages)
+        .filter((page) => page.id !== selectedPageId)
+        .filter((page) => {
+          const latestDraft = getLatestEditSessionForPageFromSnapshot(
+            snapshot,
+            page.id,
+            currentUser.id,
+          );
+          const contentToScan = latestDraft?.draftContentMarkdown ?? page.currentContentMarkdown;
+
+          return extractReferencedPageIds(contentToScan).has(selectedPageId);
+        })
+        .map((page) => ({
+          href: `/?page=${page.id}`,
+          id: page.id,
+          title: page.title,
+          workspaceLabel: workspace.type === "private" ? "Personal" : "Shared",
+        })),
+    )
+    .sort((a, b) => a.title.localeCompare(b.title));
+}
+
+function isStricterLevel(nextLevel: number | null, currentLevel: number | null) {
+  return nextLevel !== null && (currentLevel === null || nextLevel > currentLevel);
+}
+
+function isLooserLevel(nextLevel: number | null, currentLevel: number | null) {
+  return currentLevel !== null && (nextLevel === null || nextLevel < currentLevel);
+}
+
 function stripSearchText(value: string) {
   return value
     .replace(/```[\s\S]*?```/g, " ")
@@ -367,13 +541,49 @@ function getEditSessionFromSnapshot(
   );
 }
 
-function toRevisionSummary(revision: PageRevision): RevisionSummary {
+function toRevisionSummary(
+  revision: PageRevision,
+  userRows: User[],
+): RevisionSummary {
+  const user = userRows.find((candidate) => candidate.id === revision.createdByUserId);
   return {
     id: revision.id,
     revisionNumber: revision.revisionNumber,
     titleSnapshot: revision.titleSnapshot,
     createdAt: revision.createdAt,
     createdByUserId: revision.createdByUserId,
+    createdByUserName: user?.name ?? "Unknown user",
+  };
+}
+
+function createActivityEvent(params: {
+  actorUserId: string;
+  createdAt?: Date;
+  effectiveReadLevel: number | null;
+  effectiveWriteLevel: number | null;
+  eventType: PageActivityEvent["eventType"];
+  pageId: string | null;
+  pageTitle: string;
+  parentPageId?: string | null;
+  parentPageTitle?: string | null;
+  previousPageTitle?: string | null;
+  revisionNumber?: number | null;
+  workspaceId: string;
+}): PageActivityEvent {
+  return {
+    id: randomUUID(),
+    workspaceId: params.workspaceId,
+    pageId: params.pageId,
+    actorUserId: params.actorUserId,
+    eventType: params.eventType,
+    pageTitle: params.pageTitle,
+    previousPageTitle: params.previousPageTitle ?? null,
+    parentPageId: params.parentPageId ?? null,
+    parentPageTitle: params.parentPageTitle ?? null,
+    revisionNumber: params.revisionNumber ?? null,
+    effectiveReadLevel: params.effectiveReadLevel,
+    effectiveWriteLevel: params.effectiveWriteLevel,
+    createdAt: params.createdAt ?? new Date(),
   };
 }
 
@@ -636,6 +846,7 @@ function computeSubtreePermissionUpdates(params: {
   explicitReadLevel?: number | null;
   explicitWriteLevel?: number | null;
   actingUser: User;
+  descendantStrategy?: "cascade" | "preserve";
 }) {
   if (params.workspace.type === "private") {
     return [
@@ -652,6 +863,22 @@ function computeSubtreePermissionUpdates(params: {
 
   const subtree = getSubtreePages(params.pageRows, params.rootPage);
   const updates = new Map<string, Page>();
+  const rootPermissions = resolvePermissions({
+    workspace: params.workspace,
+    parentPage:
+      params.rootPage.parentPageId === null
+        ? null
+        : params.pageRows.find((candidate) => candidate.id === params.rootPage.parentPageId) ??
+          null,
+    explicitReadLevel: params.explicitReadLevel,
+    explicitWriteLevel: params.explicitWriteLevel,
+  });
+  const rootBecameStricter =
+    isStricterLevel(rootPermissions.effectiveReadLevel, params.rootPage.effectiveReadLevel) ||
+    isStricterLevel(rootPermissions.effectiveWriteLevel, params.rootPage.effectiveWriteLevel);
+  const rootBecameLooser =
+    isLooserLevel(rootPermissions.effectiveReadLevel, params.rootPage.effectiveReadLevel) ||
+    isLooserLevel(rootPermissions.effectiveWriteLevel, params.rootPage.effectiveWriteLevel);
 
   for (const page of subtree) {
     const nextParentPage = page.parentPageId
@@ -659,14 +886,89 @@ function computeSubtreePermissionUpdates(params: {
         params.pageRows.find((candidate) => candidate.id === page.parentPageId) ??
         null
       : null;
-    const permissions = resolvePermissions({
+    let explicitReadLevel =
+      page.id === params.rootPage.id
+        ? (params.explicitReadLevel ?? null)
+        : (page.explicitReadLevel ?? null);
+    let explicitWriteLevel =
+      page.id === params.rootPage.id
+        ? (params.explicitWriteLevel ?? null)
+        : (page.explicitWriteLevel ?? null);
+    let permissions = resolvePermissions({
       workspace: params.workspace,
       parentPage: nextParentPage,
-      explicitReadLevel:
-        page.id === params.rootPage.id ? params.explicitReadLevel : page.explicitReadLevel,
-      explicitWriteLevel:
-        page.id === params.rootPage.id ? params.explicitWriteLevel : page.explicitWriteLevel,
+      explicitReadLevel,
+      explicitWriteLevel,
     });
+
+    if (page.id !== params.rootPage.id && rootBecameStricter) {
+      if (
+        rootPermissions.effectiveReadLevel !== null &&
+        (explicitReadLevel === null || explicitReadLevel < rootPermissions.effectiveReadLevel)
+      ) {
+        explicitReadLevel = rootPermissions.effectiveReadLevel;
+      }
+
+      if (
+        rootPermissions.effectiveWriteLevel !== null &&
+        (explicitWriteLevel === null || explicitWriteLevel < rootPermissions.effectiveWriteLevel)
+      ) {
+        explicitWriteLevel = rootPermissions.effectiveWriteLevel;
+      }
+
+      permissions = resolvePermissions({
+        workspace: params.workspace,
+        parentPage: nextParentPage,
+        explicitReadLevel,
+        explicitWriteLevel,
+      });
+    }
+
+    if (
+      page.id !== params.rootPage.id &&
+      rootBecameLooser &&
+      params.descendantStrategy === "preserve"
+    ) {
+      if (
+        isLooserLevel(permissions.effectiveReadLevel, page.effectiveReadLevel) &&
+        page.effectiveReadLevel !== null
+      ) {
+        explicitReadLevel = Math.max(explicitReadLevel ?? page.effectiveReadLevel, page.effectiveReadLevel);
+      }
+
+      if (
+        isLooserLevel(permissions.effectiveWriteLevel, page.effectiveWriteLevel) &&
+        page.effectiveWriteLevel !== null
+      ) {
+        explicitWriteLevel = Math.max(
+          explicitWriteLevel ?? page.effectiveWriteLevel,
+          page.effectiveWriteLevel,
+        );
+      }
+
+      permissions = resolvePermissions({
+        workspace: params.workspace,
+        parentPage: nextParentPage,
+        explicitReadLevel,
+        explicitWriteLevel,
+      });
+    }
+
+    if (
+      page.id !== params.rootPage.id &&
+      rootBecameLooser &&
+      params.descendantStrategy === "cascade"
+    ) {
+      explicitReadLevel = rootPermissions.effectiveReadLevel;
+      explicitWriteLevel = rootPermissions.effectiveWriteLevel;
+
+      permissions = resolvePermissions({
+        workspace: params.workspace,
+        parentPage: nextParentPage,
+        explicitReadLevel,
+        explicitWriteLevel,
+      });
+    }
 
     if (
       permissions.effectiveWriteLevel !== null &&
@@ -694,7 +996,11 @@ function isDescendantPath(descendantPath: string, ancestorPath: string) {
 
 function getSubtreePages(pageRows: Page[], rootPage: Page) {
   return pageRows
-    .filter((page) => isDescendantPath(page.path, rootPage.path))
+    .filter(
+      (page) =>
+        page.workspaceId === rootPage.workspaceId &&
+        isDescendantPath(page.path, rootPage.path),
+    )
     .sort((a, b) => a.depth - b.depth || a.path.localeCompare(b.path));
 }
 
@@ -748,11 +1054,16 @@ function getReindexedSiblingUpdates(params: {
 }
 
 function computeSubtreeMoveUpdates(params: {
+  actingUser: User;
   pageRows: Page[];
   rootPage: Page;
   destinationParentPage: Page | null;
-  workspace: Workspace;
+  destinationWorkspace: Workspace;
   sortOrder: number;
+  nextRootSlug: string;
+  weakeningStrategy?: "inherit" | "preserve";
+  destinationExplicitReadLevel?: number | null;
+  destinationExplicitWriteLevel?: number | null;
 }) {
   const subtree = getSubtreePages(params.pageRows, params.rootPage);
   const destinationDepth = params.destinationParentPage ? params.destinationParentPage.depth + 1 : 0;
@@ -765,7 +1076,7 @@ function computeSubtreeMoveUpdates(params: {
     throw new Error(`Pages cannot be nested deeper than ${MAX_PAGE_DEPTH} levels.`);
   }
 
-  const destinationPath = buildPagePath(params.destinationParentPage, params.rootPage.slug);
+  const destinationPath = buildPagePath(params.destinationParentPage, params.nextRootSlug);
   const updates = new Map<string, Page>();
 
   for (const page of subtree) {
@@ -787,41 +1098,80 @@ function computeSubtreeMoveUpdates(params: {
       page.id === params.rootPage.id
         ? destinationDepth
         : page.depth - params.rootPage.depth + destinationDepth;
-    const permissions = resolvePermissions({
-      workspace: params.workspace,
+    let explicitReadLevel =
+      page.id === params.rootPage.id
+        ? params.destinationExplicitReadLevel ?? page.explicitReadLevel
+        : page.explicitReadLevel ?? null;
+    let explicitWriteLevel =
+      page.id === params.rootPage.id
+        ? params.destinationExplicitWriteLevel ?? page.explicitWriteLevel
+        : page.explicitWriteLevel ?? null;
+
+    if (
+      page.id === params.rootPage.id &&
+      params.destinationWorkspace.type === "shared" &&
+      params.destinationParentPage === null
+    ) {
+      explicitReadLevel ??= params.actingUser.permissionLevel;
+      explicitWriteLevel ??= params.actingUser.permissionLevel;
+    }
+
+    let permissions = resolvePermissions({
+      workspace: params.destinationWorkspace,
       parentPage: nextParentPage,
-      explicitReadLevel: page.explicitReadLevel,
-      explicitWriteLevel: page.explicitWriteLevel,
+      explicitReadLevel,
+      explicitWriteLevel,
     });
-    const updatedPage: Page = {
+
+    const readWeakened = isLooserLevel(permissions.effectiveReadLevel, page.effectiveReadLevel);
+    const writeWeakened = isLooserLevel(
+      permissions.effectiveWriteLevel,
+      page.effectiveWriteLevel,
+    );
+
+    if (params.destinationWorkspace.type === "shared" && (readWeakened || writeWeakened)) {
+      if (!params.weakeningStrategy) {
+        throw new Error("Move requires permission resolution.");
+      }
+
+      if (params.weakeningStrategy === "preserve") {
+        if (readWeakened && page.effectiveReadLevel !== null) {
+          explicitReadLevel = Math.max(
+            explicitReadLevel ?? page.effectiveReadLevel,
+            page.effectiveReadLevel,
+          );
+        }
+
+        if (writeWeakened && page.effectiveWriteLevel !== null) {
+          explicitWriteLevel = Math.max(
+            explicitWriteLevel ?? page.effectiveWriteLevel,
+            page.effectiveWriteLevel,
+          );
+        }
+
+        permissions = resolvePermissions({
+          workspace: params.destinationWorkspace,
+          parentPage: nextParentPage,
+          explicitReadLevel,
+          explicitWriteLevel,
+        });
+      }
+    }
+
+    updates.set(page.id, {
       ...page,
+      workspaceId: params.destinationWorkspace.id,
       parentPageId: nextParentId,
       path: nextPath,
       depth: nextDepth,
+      slug: page.id === params.rootPage.id ? params.nextRootSlug : page.slug,
       sortOrder: page.id === params.rootPage.id ? params.sortOrder : page.sortOrder,
       explicitReadLevel: permissions.explicitReadLevel,
       explicitWriteLevel: permissions.explicitWriteLevel,
       effectiveReadLevel: permissions.effectiveReadLevel,
       effectiveWriteLevel: permissions.effectiveWriteLevel,
       updatedAt: new Date(),
-    };
-
-    if (params.workspace.type === "shared") {
-      const readWeakened =
-        page.effectiveReadLevel !== null &&
-        updatedPage.effectiveReadLevel !== null &&
-        updatedPage.effectiveReadLevel < page.effectiveReadLevel;
-      const writeWeakened =
-        page.effectiveWriteLevel !== null &&
-        updatedPage.effectiveWriteLevel !== null &&
-        updatedPage.effectiveWriteLevel < page.effectiveWriteLevel;
-
-      if (readWeakened || writeWeakened) {
-        throw new Error("Move would weaken inherited shared-page restrictions.");
-      }
-    }
-
-    updates.set(page.id, updatedPage);
+    });
   }
 
   return Array.from(updates.values());
@@ -877,10 +1227,12 @@ export async function getKnowledgeBaseView(input: {
     return {
       availableUsers: snapshot.users,
       currentUser: null,
+      recentActivity: [],
       selectedPageId: null,
       selectedPage: null,
       selectedRevision: null,
       selectedDraft: null,
+      selectedPageBacklinks: [],
       selectedPageRevisions: [],
       visibleWorkspaces: [],
     };
@@ -892,6 +1244,16 @@ export async function getKnowledgeBaseView(input: {
     requestedPage ??
     visibleWorkspaces.flatMap(({ pages }) => flatten(pages))[0] ??
     null;
+  const selectedPageWithDescendants = selectedPage
+    ? {
+        ...selectedPage,
+        hasDescendants: snapshot.pages.some(
+          (page) =>
+            page.workspaceId === selectedPage.workspaceId &&
+            page.parentPageId === selectedPage.id,
+        ),
+      }
+    : null;
   const selectedRevision = selectedPage
     ? getRevisionForPageFromSnapshot(snapshot, selectedPage.id, selectedPage.currentRevisionId)
     : null;
@@ -900,14 +1262,28 @@ export async function getKnowledgeBaseView(input: {
       ? getLatestEditSessionForPageFromSnapshot(snapshot, selectedPage.id, currentUser.id)
       : null;
   const selectedPageRevisions = selectedPage
-    ? getPageRevisionsFromSnapshot(snapshot, selectedPage.id).map(toRevisionSummary)
+    ? getPageRevisionsFromSnapshot(snapshot, selectedPage.id).map((revision) =>
+        toRevisionSummary(revision, snapshot.users),
+      )
     : [];
+  const selectedPageBacklinks = getBacklinksFromVisibleWorkspaces(
+    snapshot,
+    currentUser,
+    visibleWorkspaces,
+    selectedPage?.id ?? null,
+  );
+  const recentActivity = getRecentActivityFromVisibleWorkspaces(
+    snapshot,
+    currentUser,
+    visibleWorkspaces,
+  );
 
   return {
     availableUsers: snapshot.users,
     currentUser,
-    selectedPageId: selectedPage?.id ?? null,
-    selectedPage,
+    recentActivity,
+    selectedPageId: selectedPageWithDescendants?.id ?? null,
+    selectedPage: selectedPageWithDescendants,
     selectedRevision,
     selectedDraft: selectedDraft
       ? {
@@ -916,6 +1292,7 @@ export async function getKnowledgeBaseView(input: {
           editorDocJson: selectedDraft.draftEditorDocJson,
         }
       : null,
+    selectedPageBacklinks,
     selectedPageRevisions,
     visibleWorkspaces,
   };
@@ -980,12 +1357,164 @@ export async function getPageRevisions(input: { actingUserId: string; pageId: st
     throw new Error("You do not have permission to read this page.");
   }
 
-  return getPageRevisionsFromSnapshot(snapshot, page.id).map(toRevisionSummary);
+  return getPageRevisionsFromSnapshot(snapshot, page.id).map((revision) =>
+    toRevisionSummary(revision, snapshot.users),
+  );
+}
+
+function restoreFallbackPageRevision(
+  input: RestorePageRevisionInput,
+): RestorePageRevisionResult {
+  const snapshot = fallbackStore;
+  const { actingUser, page, workspace } = getPageContext(snapshot, input);
+
+  if (!canWritePage(actingUser, workspace, page)) {
+    throw new Error("You do not have permission to restore this page.");
+  }
+
+  const targetRevision = snapshot.revisions.find(
+    (revision) => revision.id === input.revisionId && revision.pageId === page.id,
+  );
+
+  if (!targetRevision) {
+    throw new Error("Revision not found.");
+  }
+
+  const currentRevisionNumber =
+    getPageRevisionsFromSnapshot(snapshot, page.id)[0]?.revisionNumber ?? 0;
+  const restoredRevision: PageRevision = {
+    id: randomUUID(),
+    pageId: page.id,
+    revisionNumber: currentRevisionNumber + 1,
+    titleSnapshot: targetRevision.titleSnapshot,
+    contentMarkdown: targetRevision.contentMarkdown,
+    editorDocJson: targetRevision.editorDocJson ?? null,
+    createdByUserId: actingUser.id,
+    createdAt: new Date(),
+  };
+  const updatedPage: Page = {
+    ...page,
+    title: targetRevision.titleSnapshot,
+    currentRevisionId: restoredRevision.id,
+    updatedByUserId: actingUser.id,
+    updatedAt: restoredRevision.createdAt,
+  };
+
+  fallbackStore = {
+    ...snapshot,
+    pages: snapshot.pages.map((candidate) =>
+      candidate.id === page.id ? updatedPage : candidate,
+    ),
+    revisions: [restoredRevision, ...snapshot.revisions],
+    editSessions: snapshot.editSessions.filter((session) => session.pageId !== page.id),
+  };
+
+  return {
+    page: updatedPage,
+    revision: restoredRevision,
+  };
+}
+
+async function restoreDatabasePageRevision(
+  input: RestorePageRevisionInput,
+): Promise<RestorePageRevisionResult> {
+  if (!db) {
+    throw new Error("DATABASE_URL is required for database writes.");
+  }
+
+  return db.transaction(async (tx) => {
+    const [actingUser] = await tx
+      .select()
+      .from(users)
+      .where(eq(users.id, input.actingUserId))
+      .limit(1);
+
+    if (!actingUser) {
+      throw new Error("Acting user not found.");
+    }
+
+    const [page] = await tx.select().from(pages).where(eq(pages.id, input.pageId)).limit(1);
+
+    if (!page) {
+      throw new Error("Page not found.");
+    }
+
+    const [workspace] = await tx
+      .select()
+      .from(workspaces)
+      .where(eq(workspaces.id, page.workspaceId))
+      .limit(1);
+
+    if (!workspace) {
+      throw new Error("Workspace not found.");
+    }
+
+    if (!canWritePage(actingUser, workspace, page)) {
+      throw new Error("You do not have permission to restore this page.");
+    }
+
+    const [targetRevision] = await tx
+      .select()
+      .from(pageRevisions)
+      .where(and(eq(pageRevisions.id, input.revisionId), eq(pageRevisions.pageId, page.id)))
+      .limit(1);
+
+    if (!targetRevision) {
+      throw new Error("Revision not found.");
+    }
+
+    const currentRevisionNumber = (
+      await tx
+        .select({ value: max(pageRevisions.revisionNumber) })
+        .from(pageRevisions)
+        .where(eq(pageRevisions.pageId, page.id))
+    )[0]?.value ?? 0;
+
+    const [restoredRevision] = await tx
+      .insert(pageRevisions)
+      .values({
+        pageId: page.id,
+        revisionNumber: currentRevisionNumber + 1,
+        titleSnapshot: targetRevision.titleSnapshot,
+        contentMarkdown: targetRevision.contentMarkdown,
+        editorDocJson: targetRevision.editorDocJson ?? null,
+        createdByUserId: actingUser.id,
+      })
+      .returning();
+
+    const [updatedPage] = await tx
+      .update(pages)
+      .set({
+        title: targetRevision.titleSnapshot,
+        currentRevisionId: restoredRevision.id,
+        updatedByUserId: actingUser.id,
+        updatedAt: restoredRevision.createdAt,
+      })
+      .where(eq(pages.id, page.id))
+      .returning();
+
+    await tx.delete(pageEditSessions).where(eq(pageEditSessions.pageId, page.id));
+
+    return {
+      page: updatedPage,
+      revision: restoredRevision,
+    };
+  });
+}
+
+export async function restorePageRevision(
+  input: RestorePageRevisionInput,
+): Promise<RestorePageRevisionResult> {
+  if (!db) {
+    return restoreFallbackPageRevision(input);
+  }
+
+  return restoreDatabasePageRevision(input);
 }
 
 function updateFallbackPage(input: SavePageInput): SavePageResult {
   const snapshot = fallbackStore;
-  const { actingUser, page } = assertPageWriteAccess(snapshot, input);
+  const { actingUser, page, workspace } = assertPageWriteAccess(snapshot, input);
   assertCurrentRevisionMatches(page, input.currentRevisionId);
   const previousRevision = getPageRevisionsFromSnapshot(snapshot, page.id)[0] ?? null;
   const saveMode = input.saveMode ?? "manual";
@@ -1050,6 +1579,11 @@ function updateFallbackPage(input: SavePageInput): SavePageResult {
     updatedByUserId: actingUser.id,
     updatedAt: new Date(),
   };
+  const titleChanged = page.title !== input.title;
+  const contentChanged =
+    previousRevision?.contentMarkdown !== input.contentMarkdown ||
+    JSON.stringify(previousRevision?.editorDocJson ?? null) !==
+      JSON.stringify(input.editorDocJson ?? null);
   const nextEditSessions = input.editorSessionId
     ? upsertFallbackEditSession(snapshot.editSessions, {
         pageId: page.id,
@@ -1061,9 +1595,45 @@ function updateFallbackPage(input: SavePageInput): SavePageResult {
         draftEditorDocJson: input.editorDocJson ?? null,
       })
     : snapshot.editSessions;
+  const activityEvents = [...snapshot.activityEvents];
+
+  if (workspace.type === "shared") {
+    if (titleChanged) {
+      activityEvents.unshift(
+        createActivityEvent({
+          actorUserId: actingUser.id,
+          createdAt: updatedPage.updatedAt,
+          effectiveReadLevel: updatedPage.effectiveReadLevel,
+          effectiveWriteLevel: updatedPage.effectiveWriteLevel,
+          eventType: "page_renamed",
+          pageId: updatedPage.id,
+          pageTitle: updatedPage.title,
+          previousPageTitle: page.title,
+          workspaceId: workspace.id,
+        }),
+      );
+    }
+
+    if (contentChanged) {
+      activityEvents.unshift(
+        createActivityEvent({
+          actorUserId: actingUser.id,
+          createdAt: revision.createdAt,
+          effectiveReadLevel: updatedPage.effectiveReadLevel,
+          effectiveWriteLevel: updatedPage.effectiveWriteLevel,
+          eventType: "page_edited",
+          pageId: updatedPage.id,
+          pageTitle: updatedPage.title,
+          revisionNumber: revision.revisionNumber,
+          workspaceId: workspace.id,
+        }),
+      );
+    }
+  }
 
   fallbackStore = {
     ...snapshot,
+    activityEvents,
     pages: snapshot.pages.map((pageRow) =>
       pageRow.id === updatedPage.id ? updatedPage : pageRow,
     ),
@@ -1187,6 +1757,21 @@ async function updateDatabasePage(input: SavePageInput): Promise<SavePageResult>
         createdByUserId: actingUser.id,
       })
       .returning();
+    const titleChanged = page.title !== input.title;
+    const previousRevision =
+      page.currentRevisionId
+        ? (
+            await tx
+              .select()
+              .from(pageRevisions)
+              .where(eq(pageRevisions.id, page.currentRevisionId))
+              .limit(1)
+          )[0] ?? null
+        : null;
+    const contentChanged =
+      previousRevision?.contentMarkdown !== input.contentMarkdown ||
+      JSON.stringify(previousRevision?.editorDocJson ?? null) !==
+        JSON.stringify(input.editorDocJson ?? null);
 
     const [updatedPage] = await tx
       .update(pages)
@@ -1198,6 +1783,36 @@ async function updateDatabasePage(input: SavePageInput): Promise<SavePageResult>
       })
       .where(and(eq(pages.id, page.id), eq(pages.workspaceId, workspace.id)))
       .returning();
+
+    if (workspace.type === "shared") {
+      if (titleChanged) {
+        await tx.insert(pageActivityEvents).values({
+          workspaceId: workspace.id,
+          pageId: updatedPage.id,
+          actorUserId: actingUser.id,
+          eventType: "page_renamed",
+          pageTitle: updatedPage.title,
+          previousPageTitle: page.title,
+          effectiveReadLevel: updatedPage.effectiveReadLevel,
+          effectiveWriteLevel: updatedPage.effectiveWriteLevel,
+          createdAt: updatedPage.updatedAt,
+        });
+      }
+
+      if (contentChanged) {
+        await tx.insert(pageActivityEvents).values({
+          workspaceId: workspace.id,
+          pageId: updatedPage.id,
+          actorUserId: actingUser.id,
+          eventType: "page_edited",
+          pageTitle: updatedPage.title,
+          revisionNumber: revision.revisionNumber,
+          effectiveReadLevel: updatedPage.effectiveReadLevel,
+          effectiveWriteLevel: updatedPage.effectiveWriteLevel,
+          createdAt: revision.createdAt,
+        });
+      }
+    }
 
     if (input.editorSessionId) {
       const existingSession =
@@ -1282,6 +1897,7 @@ function updateFallbackPageMetadata(
     explicitReadLevel: input.explicitReadLevel,
     explicitWriteLevel: input.explicitWriteLevel,
     actingUser,
+    descendantStrategy: input.descendantStrategy,
   }).map((updatedPage) => ({
     ...updatedPage,
     updatedByUserId: actingUser.id,
@@ -1353,6 +1969,7 @@ async function updateDatabasePageMetadata(
       explicitReadLevel: input.explicitReadLevel,
       explicitWriteLevel: input.explicitWriteLevel,
       actingUser,
+      descendantStrategy: input.descendantStrategy,
     });
     const updatesById = new Map(updates.map((updatedPage) => [updatedPage.id, updatedPage]));
 
@@ -1422,11 +2039,19 @@ function createFallbackPage(input: CreatePageInput): CreatePageResult {
     throw new Error("Parent page must belong to the selected workspace.");
   }
 
+  const defaultExplicitReadLevel =
+    workspace.type === "shared"
+      ? input.explicitReadLevel ?? actingUser.permissionLevel
+      : null;
+  const defaultExplicitWriteLevel =
+    workspace.type === "shared"
+      ? input.explicitWriteLevel ?? actingUser.permissionLevel
+      : null;
   const permissions = resolvePermissions({
     workspace,
     parentPage,
-    explicitReadLevel: input.explicitReadLevel,
-    explicitWriteLevel: input.explicitWriteLevel,
+    explicitReadLevel: defaultExplicitReadLevel,
+    explicitWriteLevel: defaultExplicitWriteLevel,
   });
 
   assertUserCanCreatePage({
@@ -1475,9 +2100,23 @@ function createFallbackPage(input: CreatePageInput): CreatePageResult {
     ...page,
     currentRevisionId: revision.id,
   };
+  const activityEvent = createActivityEvent({
+    actorUserId: actingUser.id,
+    createdAt: revision.createdAt,
+    effectiveReadLevel: pageWithRevision.effectiveReadLevel,
+    effectiveWriteLevel: pageWithRevision.effectiveWriteLevel,
+    eventType: "page_created",
+    pageId: pageWithRevision.id,
+    pageTitle: pageWithRevision.title,
+    parentPageId: parentPage?.id ?? null,
+    parentPageTitle: parentPage?.title ?? null,
+    revisionNumber: revision.revisionNumber,
+    workspaceId: workspace.id,
+  });
 
   fallbackStore = {
     ...snapshot,
+    activityEvents: [activityEvent, ...snapshot.activityEvents],
     pages: [...snapshot.pages, pageWithRevision],
     revisions: [revision, ...snapshot.revisions],
   };
@@ -1536,11 +2175,19 @@ async function createDatabasePage(input: CreatePageInput): Promise<CreatePageRes
       .select()
       .from(pages)
       .where(eq(pages.workspaceId, workspace.id));
+    const defaultExplicitReadLevel =
+      workspace.type === "shared"
+        ? input.explicitReadLevel ?? actingUser.permissionLevel
+        : null;
+    const defaultExplicitWriteLevel =
+      workspace.type === "shared"
+        ? input.explicitWriteLevel ?? actingUser.permissionLevel
+        : null;
     const permissions = resolvePermissions({
       workspace,
       parentPage,
-      explicitReadLevel: input.explicitReadLevel,
-      explicitWriteLevel: input.explicitWriteLevel,
+      explicitReadLevel: defaultExplicitReadLevel,
+      explicitWriteLevel: defaultExplicitWriteLevel,
     });
 
     assertUserCanCreatePage({
@@ -1592,6 +2239,20 @@ async function createDatabasePage(input: CreatePageInput): Promise<CreatePageRes
       .where(eq(pages.id, page.id))
       .returning();
 
+    await tx.insert(pageActivityEvents).values({
+      workspaceId: workspace.id,
+      pageId: updatedPage.id,
+      actorUserId: actingUser.id,
+      eventType: "page_created",
+      pageTitle: updatedPage.title,
+      parentPageId: parentPage?.id ?? null,
+      parentPageTitle: parentPage?.title ?? null,
+      revisionNumber: revision.revisionNumber,
+      effectiveReadLevel: updatedPage.effectiveReadLevel,
+      effectiveWriteLevel: updatedPage.effectiveWriteLevel,
+      createdAt: revision.createdAt,
+    });
+
     return {
       page: updatedPage,
       revision,
@@ -1629,16 +2290,33 @@ function moveFallbackPage(input: MovePageInput): MovePageResult {
   const destinationParentPage = input.destinationParentPageId
     ? getPageFromSnapshot(snapshot, input.destinationParentPageId)
     : null;
+  const destinationWorkspace =
+    destinationParentPage
+      ? getWorkspaceFromSnapshot(snapshot, destinationParentPage.workspaceId)
+      : getWorkspaceFromSnapshot(
+          snapshot,
+          input.destinationWorkspaceId ?? page.workspaceId,
+        );
 
   if (input.destinationParentPageId && !destinationParentPage) {
     throw new Error("Destination parent page not found.");
   }
 
-  if (destinationParentPage && destinationParentPage.workspaceId !== workspace.id) {
-    throw new Error("Pages can only be moved within the same workspace.");
+  if (!destinationWorkspace) {
+    throw new Error("Destination workspace not found.");
   }
 
-  if (destinationParentPage && !canWritePage(actingUser, workspace, destinationParentPage)) {
+  if (
+    destinationWorkspace.type === "private" &&
+    destinationWorkspace.ownerUserId !== actingUser.id
+  ) {
+    throw new Error("You do not have permission to move pages into that workspace.");
+  }
+
+  if (
+    destinationParentPage &&
+    !canWritePage(actingUser, destinationWorkspace, destinationParentPage)
+  ) {
     throw new Error("You do not have permission to move pages under that parent.");
   }
 
@@ -1646,16 +2324,25 @@ function moveFallbackPage(input: MovePageInput): MovePageResult {
     throw new Error("A page cannot be moved inside its own subtree.");
   }
 
-  const sameParent = page.parentPageId === (destinationParentPage?.id ?? null);
+  const allPages = snapshot.pages.filter(
+    (candidate) =>
+      candidate.workspaceId === page.workspaceId ||
+      candidate.workspaceId === destinationWorkspace.id,
+  );
+  const sameParent =
+    page.workspaceId === destinationWorkspace.id &&
+    page.parentPageId === (destinationParentPage?.id ?? null);
   const sourceSiblings = sortSiblingPages(
-    getChildrenForParent(snapshot.pages, workspace.id, page.parentPageId).filter(
+    getChildrenForParent(allPages, page.workspaceId, page.parentPageId).filter(
       (candidate) => candidate.id !== page.id,
     ),
   );
   const destinationSiblings = sortSiblingPages(
-    getChildrenForParent(snapshot.pages, workspace.id, destinationParentPage?.id ?? null).filter(
-      (candidate) => candidate.id !== page.id,
-    ),
+    getChildrenForParent(
+      allPages,
+      destinationWorkspace.id,
+      destinationParentPage?.id ?? null,
+    ).filter((candidate) => candidate.id !== page.id),
   );
   const destinationIndex = getNormalizedDestinationIndex(
     destinationSiblings,
@@ -1669,13 +2356,46 @@ function moveFallbackPage(input: MovePageInput): MovePageResult {
     sourceSiblings,
     sameParent,
   });
+  const nextRootSlug = ensureWorkspaceSlug(
+    snapshot.pages,
+    destinationWorkspace.id,
+    page.slug,
+    page.id,
+  );
+  const destinationExplicitReadLevel =
+    destinationWorkspace.type === "private"
+      ? null
+      : destinationParentPage
+        ? undefined
+        : input.destinationExplicitReadLevel ?? page.explicitReadLevel ?? actingUser.permissionLevel;
+  const destinationExplicitWriteLevel =
+    destinationWorkspace.type === "private"
+      ? null
+      : destinationParentPage
+        ? undefined
+        : input.destinationExplicitWriteLevel ?? page.explicitWriteLevel ?? actingUser.permissionLevel;
   const updates = computeSubtreeMoveUpdates({
-    pageRows: snapshot.pages,
+    actingUser,
+    pageRows: allPages,
     rootPage: page,
     destinationParentPage,
-    workspace,
+    destinationWorkspace,
     sortOrder: movePlan.rootSortOrder,
+    nextRootSlug,
+    weakeningStrategy: input.weakeningStrategy,
+    destinationExplicitReadLevel,
+    destinationExplicitWriteLevel,
   });
+
+  if (
+    updates.some(
+      (candidate) =>
+        candidate.effectiveWriteLevel !== null &&
+        actingUser.permissionLevel < candidate.effectiveWriteLevel,
+    )
+  ) {
+    throw new Error("You cannot move a page above your write permission level.");
+  }
   const normalizedUpdates = updates.map((candidate) =>
     candidate.id === page.id
       ? candidate
@@ -1697,6 +2417,26 @@ function moveFallbackPage(input: MovePageInput): MovePageResult {
 
   fallbackStore = {
     ...snapshot,
+    activityEvents:
+      updatedPage &&
+      destinationWorkspace.type === "shared" &&
+      (page.workspaceId !== destinationWorkspace.id ||
+        page.parentPageId !== (destinationParentPage?.id ?? null))
+        ? [
+            createActivityEvent({
+              actorUserId: actingUser.id,
+              effectiveReadLevel: updatedPage.effectiveReadLevel,
+              effectiveWriteLevel: updatedPage.effectiveWriteLevel,
+              eventType: "page_moved",
+              pageId: updatedPage.id,
+              pageTitle: updatedPage.title,
+              parentPageId: destinationParentPage?.id ?? null,
+              parentPageTitle: destinationParentPage?.title ?? null,
+              workspaceId: destinationWorkspace.id,
+            }),
+            ...snapshot.activityEvents,
+          ]
+        : snapshot.activityEvents,
     pages: snapshot.pages.map(
       (pageRow) => mergedUpdates.get(pageRow.id) ?? pageRow,
     ),
@@ -1747,36 +2487,70 @@ async function moveDatabasePage(input: MovePageInput): Promise<MovePageResult> {
       throw new Error("You do not have permission to move this page.");
     }
 
-    const workspacePages = await tx
-      .select()
-      .from(pages)
-      .where(eq(pages.workspaceId, workspace.id));
+    const destinationWorkspace = input.destinationParentPageId
+      ? null
+      : (
+          await tx
+            .select()
+            .from(workspaces)
+            .where(eq(workspaces.id, input.destinationWorkspaceId ?? page.workspaceId))
+            .limit(1)
+        )[0] ?? null;
+    const pageRows = await tx.select().from(pages);
     const destinationParentPage = input.destinationParentPageId
-      ? workspacePages.find((candidate) => candidate.id === input.destinationParentPageId) ?? null
+      ? pageRows.find((candidate) => candidate.id === input.destinationParentPageId) ?? null
       : null;
+    const resolvedDestinationWorkspace =
+      destinationParentPage
+        ? (
+            await tx
+              .select()
+              .from(workspaces)
+              .where(eq(workspaces.id, destinationParentPage.workspaceId))
+              .limit(1)
+          )[0] ?? null
+        : destinationWorkspace;
 
     if (input.destinationParentPageId && !destinationParentPage) {
       throw new Error("Destination parent page not found.");
+    }
+
+    if (!resolvedDestinationWorkspace) {
+      throw new Error("Destination workspace not found.");
     }
 
     if (destinationParentPage && isDescendantPath(destinationParentPage.path, page.path)) {
       throw new Error("A page cannot be moved inside its own subtree.");
     }
 
-    if (destinationParentPage && !canWritePage(actingUser, workspace, destinationParentPage)) {
+    if (
+      resolvedDestinationWorkspace.type === "private" &&
+      resolvedDestinationWorkspace.ownerUserId !== actingUser.id
+    ) {
+      throw new Error("You do not have permission to move pages into that workspace.");
+    }
+
+    if (
+      destinationParentPage &&
+      !canWritePage(actingUser, resolvedDestinationWorkspace, destinationParentPage)
+    ) {
       throw new Error("You do not have permission to move pages under that parent.");
     }
 
-    const sameParent = page.parentPageId === (destinationParentPage?.id ?? null);
+    const sameParent =
+      page.workspaceId === resolvedDestinationWorkspace.id &&
+      page.parentPageId === (destinationParentPage?.id ?? null);
     const sourceSiblings = sortSiblingPages(
-      getChildrenForParent(workspacePages, workspace.id, page.parentPageId).filter(
+      getChildrenForParent(pageRows, page.workspaceId, page.parentPageId).filter(
         (candidate) => candidate.id !== page.id,
       ),
     );
     const destinationSiblings = sortSiblingPages(
-      getChildrenForParent(workspacePages, workspace.id, destinationParentPage?.id ?? null).filter(
-        (candidate) => candidate.id !== page.id,
-      ),
+      getChildrenForParent(
+        pageRows,
+        resolvedDestinationWorkspace.id,
+        destinationParentPage?.id ?? null,
+      ).filter((candidate) => candidate.id !== page.id),
     );
     const destinationIndex = getNormalizedDestinationIndex(
       destinationSiblings,
@@ -1790,13 +2564,46 @@ async function moveDatabasePage(input: MovePageInput): Promise<MovePageResult> {
       sourceSiblings,
       sameParent,
     });
+    const nextRootSlug = ensureWorkspaceSlug(
+      pageRows,
+      resolvedDestinationWorkspace.id,
+      page.slug,
+      page.id,
+    );
+    const destinationExplicitReadLevel =
+      resolvedDestinationWorkspace.type === "private"
+        ? null
+        : destinationParentPage
+          ? undefined
+          : input.destinationExplicitReadLevel ?? page.explicitReadLevel ?? actingUser.permissionLevel;
+    const destinationExplicitWriteLevel =
+      resolvedDestinationWorkspace.type === "private"
+        ? null
+        : destinationParentPage
+          ? undefined
+          : input.destinationExplicitWriteLevel ?? page.explicitWriteLevel ?? actingUser.permissionLevel;
     const updates = computeSubtreeMoveUpdates({
-      pageRows: workspacePages,
+      actingUser,
+      pageRows,
       rootPage: page,
       destinationParentPage,
-      workspace,
+      destinationWorkspace: resolvedDestinationWorkspace,
       sortOrder: movePlan.rootSortOrder,
+      nextRootSlug,
+      weakeningStrategy: input.weakeningStrategy,
+      destinationExplicitReadLevel,
+      destinationExplicitWriteLevel,
     });
+
+    if (
+      updates.some(
+        (candidate) =>
+          candidate.effectiveWriteLevel !== null &&
+          actingUser.permissionLevel < candidate.effectiveWriteLevel,
+      )
+    ) {
+      throw new Error("You cannot move a page above your write permission level.");
+    }
     const normalizedUpdates = updates.map((candidate) =>
       candidate.id === page.id
         ? candidate
@@ -1804,7 +2611,7 @@ async function moveDatabasePage(input: MovePageInput): Promise<MovePageResult> {
           ? { ...candidate, sortOrder: movePlan.siblingSortOrders.get(candidate.id) ?? candidate.sortOrder }
           : candidate,
     );
-    const siblingUpdates = workspacePages
+    const siblingUpdates = pageRows
       .filter((candidate) => candidate.id !== page.id && movePlan.siblingSortOrders.has(candidate.id))
       .map((candidate) => ({
         ...candidate,
@@ -1819,14 +2626,17 @@ async function moveDatabasePage(input: MovePageInput): Promise<MovePageResult> {
       await tx
         .update(pages)
         .set({
+          workspaceId: update.workspaceId,
           parentPageId: update.parentPageId,
           path: update.path,
           depth: update.depth,
+          slug: update.slug,
           sortOrder: update.sortOrder,
           explicitReadLevel: update.explicitReadLevel,
           explicitWriteLevel: update.explicitWriteLevel,
           effectiveReadLevel: update.effectiveReadLevel,
           effectiveWriteLevel: update.effectiveWriteLevel,
+          updatedByUserId: actingUser.id,
           updatedAt: new Date(),
         })
         .where(eq(pages.id, update.id));
@@ -1836,6 +2646,24 @@ async function moveDatabasePage(input: MovePageInput): Promise<MovePageResult> {
 
     if (!updatedRoot) {
       throw new Error("Failed to move page.");
+    }
+
+    if (
+      resolvedDestinationWorkspace.type === "shared" &&
+      (page.workspaceId !== resolvedDestinationWorkspace.id ||
+        page.parentPageId !== (destinationParentPage?.id ?? null))
+    ) {
+      await tx.insert(pageActivityEvents).values({
+        workspaceId: resolvedDestinationWorkspace.id,
+        pageId: updatedRoot.id,
+        actorUserId: actingUser.id,
+        eventType: "page_moved",
+        pageTitle: updatedRoot.title,
+        parentPageId: destinationParentPage?.id ?? null,
+        parentPageTitle: destinationParentPage?.title ?? null,
+        effectiveReadLevel: updatedRoot.effectiveReadLevel,
+        effectiveWriteLevel: updatedRoot.effectiveWriteLevel,
+      });
     }
 
     return {
@@ -1855,9 +2683,66 @@ export async function movePage(input: MovePageInput): Promise<MovePageResult> {
 function deleteFallbackPage(input: DeletePageInput): DeletePageResult {
   const snapshot = fallbackStore;
   const { actingUser, page, workspace } = getPageContext(snapshot, input);
+  const deleteMode = input.mode ?? "delete-subtree";
 
   if (!canWritePage(actingUser, workspace, page)) {
     throw new Error("You do not have permission to delete this page.");
+  }
+
+  if (deleteMode === "keep-descendants") {
+    const directChildren = sortSiblingPages(
+      getChildrenForParent(snapshot.pages, workspace.id, page.id),
+    );
+    let nextPages = [...snapshot.pages];
+    let destinationIndex = page.sortOrder;
+
+    for (const child of directChildren) {
+      const updates = computeSubtreeMoveUpdates({
+        actingUser,
+        pageRows: nextPages,
+        rootPage: child,
+        destinationParentPage: page.parentPageId
+          ? nextPages.find((candidate) => candidate.id === page.parentPageId) ?? null
+          : null,
+        destinationWorkspace: workspace,
+        sortOrder: destinationIndex,
+        nextRootSlug: child.slug,
+        weakeningStrategy: "preserve",
+      });
+      const updatesById = new Map(updates.map((updatedPage) => [updatedPage.id, updatedPage]));
+      nextPages = nextPages.map((pageRow) => updatesById.get(pageRow.id) ?? pageRow);
+      destinationIndex += 1;
+    }
+
+    const redirectPageId =
+      directChildren[0]?.id ?? getRedirectPageAfterDelete({ ...snapshot, pages: nextPages }, page);
+
+    fallbackStore = {
+      ...snapshot,
+      activityEvents:
+        workspace.type === "shared"
+          ? [
+              createActivityEvent({
+                actorUserId: actingUser.id,
+                effectiveReadLevel: page.effectiveReadLevel,
+                effectiveWriteLevel: page.effectiveWriteLevel,
+                eventType: "page_deleted",
+                pageId: null,
+                pageTitle: page.title,
+                workspaceId: workspace.id,
+              }),
+              ...snapshot.activityEvents,
+            ]
+          : snapshot.activityEvents,
+      pages: nextPages.filter((pageRow) => pageRow.id !== page.id),
+      revisions: snapshot.revisions.filter((revision) => revision.pageId !== page.id),
+      editSessions: snapshot.editSessions.filter((session) => session.pageId !== page.id),
+    };
+
+    return {
+      deletedPageId: page.id,
+      redirectPageId,
+    };
   }
 
   const subtreeIds = new Set(
@@ -1867,6 +2752,21 @@ function deleteFallbackPage(input: DeletePageInput): DeletePageResult {
 
   fallbackStore = {
     ...snapshot,
+    activityEvents:
+      workspace.type === "shared"
+        ? [
+            createActivityEvent({
+              actorUserId: actingUser.id,
+              effectiveReadLevel: page.effectiveReadLevel,
+              effectiveWriteLevel: page.effectiveWriteLevel,
+              eventType: "page_deleted",
+              pageId: null,
+              pageTitle: page.title,
+              workspaceId: workspace.id,
+            }),
+            ...snapshot.activityEvents,
+          ]
+        : snapshot.activityEvents,
     pages: snapshot.pages.filter((pageRow) => !subtreeIds.has(pageRow.id)),
     revisions: snapshot.revisions.filter((revision) => !subtreeIds.has(revision.pageId)),
   };
@@ -1913,12 +2813,92 @@ async function deleteDatabasePage(input: DeletePageInput): Promise<DeletePageRes
       throw new Error("You do not have permission to delete this page.");
     }
 
+    const deleteMode = input.mode ?? "delete-subtree";
     const workspacePages = await tx
       .select()
       .from(pages)
       .where(eq(pages.workspaceId, workspace.id));
+
+    if (deleteMode === "keep-descendants") {
+      const directChildren = sortSiblingPages(
+        getChildrenForParent(workspacePages, workspace.id, page.id),
+      );
+      let nextPages = [...workspacePages];
+      let destinationIndex = page.sortOrder;
+
+      for (const child of directChildren) {
+        const updates = computeSubtreeMoveUpdates({
+          actingUser,
+          pageRows: nextPages,
+          rootPage: child,
+          destinationParentPage: page.parentPageId
+            ? nextPages.find((candidate) => candidate.id === page.parentPageId) ?? null
+            : null,
+          destinationWorkspace: workspace,
+          sortOrder: destinationIndex,
+          nextRootSlug: child.slug,
+          weakeningStrategy: "preserve",
+        });
+        const updatesById = new Map(updates.map((updatedPage) => [updatedPage.id, updatedPage]));
+        nextPages = nextPages.map((pageRow) => updatesById.get(pageRow.id) ?? pageRow);
+
+        for (const update of updates) {
+          await tx
+            .update(pages)
+            .set({
+              parentPageId: update.parentPageId,
+              path: update.path,
+              depth: update.depth,
+              sortOrder: update.sortOrder,
+              explicitReadLevel: update.explicitReadLevel,
+              explicitWriteLevel: update.explicitWriteLevel,
+              effectiveReadLevel: update.effectiveReadLevel,
+              effectiveWriteLevel: update.effectiveWriteLevel,
+              updatedByUserId: actingUser.id,
+              updatedAt: update.updatedAt,
+            })
+            .where(eq(pages.id, update.id));
+        }
+
+        destinationIndex += 1;
+      }
+
+      const redirectPageId =
+        directChildren[0]?.id ?? getRedirectPageAfterDelete(
+          {
+            activityEvents: [],
+            users: [],
+            workspaces: [workspace],
+            pages: nextPages,
+            revisions: [],
+            editSessions: [],
+          },
+          page,
+        );
+
+      await tx.delete(pages).where(eq(pages.id, page.id));
+
+      if (workspace.type === "shared") {
+        await tx.insert(pageActivityEvents).values({
+          workspaceId: workspace.id,
+          pageId: null,
+          actorUserId: actingUser.id,
+          eventType: "page_deleted",
+          pageTitle: page.title,
+          effectiveReadLevel: page.effectiveReadLevel,
+          effectiveWriteLevel: page.effectiveWriteLevel,
+        });
+      }
+
+      return {
+        deletedPageId: page.id,
+        redirectPageId,
+      };
+    }
+
     const redirectPageId = getRedirectPageAfterDelete(
       {
+        activityEvents: [],
         users: [],
         workspaces: [workspace],
         pages: workspacePages,
@@ -1929,6 +2909,18 @@ async function deleteDatabasePage(input: DeletePageInput): Promise<DeletePageRes
     );
 
     await tx.delete(pages).where(eq(pages.id, page.id));
+
+    if (workspace.type === "shared") {
+      await tx.insert(pageActivityEvents).values({
+        workspaceId: workspace.id,
+        pageId: null,
+        actorUserId: actingUser.id,
+        eventType: "page_deleted",
+        pageTitle: page.title,
+        effectiveReadLevel: page.effectiveReadLevel,
+        effectiveWriteLevel: page.effectiveWriteLevel,
+      });
+    }
 
     return {
       deletedPageId: page.id,

@@ -6,8 +6,6 @@ import {
   CursorOverlayPlugin,
 } from "@platejs/selection/react";
 import { createPlatePlugin, type PlateElementProps, useEditorRef } from "platejs/react";
-import { DndProvider } from "react-dnd";
-import { HTML5Backend } from "react-dnd-html5-backend";
 
 import { BaseEditorKit } from "@/components/editor/editor-base-kit";
 import { AutoformatKit } from "@/components/editor/plugins/autoformat-kit";
@@ -41,7 +39,6 @@ export const EditorKit = [
     },
     render: {
       aboveNodes: BlockDraggable,
-      aboveSlate: ({ children }) => <DndProvider backend={HTML5Backend}>{children}</DndProvider>,
     },
   }),
   ...AutoformatKit,

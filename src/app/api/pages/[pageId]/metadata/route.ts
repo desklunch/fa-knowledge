@@ -7,6 +7,7 @@ import { getImpersonatedUserId } from "@/lib/impersonation";
 const updateMetadataSchema = z.object({
   explicitReadLevel: z.number().int().min(1).max(3).nullable().optional(),
   explicitWriteLevel: z.number().int().min(1).max(3).nullable().optional(),
+  descendantStrategy: z.enum(["cascade", "preserve"]).optional(),
 });
 
 export async function PATCH(
@@ -33,6 +34,7 @@ export async function PATCH(
       pageId,
       explicitReadLevel: parsedBody.data.explicitReadLevel ?? null,
       explicitWriteLevel: parsedBody.data.explicitWriteLevel ?? null,
+      descendantStrategy: parsedBody.data.descendantStrategy,
     });
 
     return NextResponse.json({

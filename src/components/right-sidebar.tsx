@@ -1,11 +1,16 @@
+"use client";
+
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { PageMetadataForm } from "@/components/page-metadata-form";
+import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import Link from "next/link";
 import type { ReactNode } from "react";
+import { useRouter } from "next/navigation";
 
 type DraftSnapshot = {
   contentMarkdown: string;
@@ -14,8 +19,10 @@ type DraftSnapshot = {
 
 type RevisionSummary = {
   createdAt: Date;
+  createdByUserName: string;
   id: string;
   revisionNumber: number;
+  titleSnapshot: string;
 };
 
 type SelectedRevision = {
@@ -25,16 +32,29 @@ type SelectedRevision = {
 
 type SelectedPage = {
   canWrite: boolean;
+  createdAt: Date;
+  createdByUserId: string;
   explicitReadLevel: number | null;
   explicitWriteLevel: number | null;
+  effectiveReadLevel: number | null;
+  effectiveWriteLevel: number | null;
+  hasDescendants: boolean;
   id: string;
   parentPageId: string | null;
   title: string;
+  updatedAt: Date;
+  updatedByUserId: string;
 };
 
 type RightSidebarProps = {
-  availableUsers: Array<{ name: string }>;
+  availableUsers: Array<{ id: string; name: string }>;
   currentWorkspaceType: "private" | "shared";
+  selectedPageBacklinks: Array<{
+    href: string;
+    id: string;
+    title: string;
+    workspaceLabel: string;
+  }>;
   selectedDraft: DraftSnapshot;
   selectedPage: SelectedPage | null;
   selectedPageRevisions: RevisionSummary[];
@@ -44,13 +64,34 @@ type RightSidebarProps = {
 export function RightSidebar({
   availableUsers,
   currentWorkspaceType,
+  selectedPageBacklinks,
   selectedDraft,
   selectedPage,
   selectedPageRevisions,
   selectedRevision,
 }: RightSidebarProps) {
+  const router = useRouter();
+  const userNameById = new Map(availableUsers.map((user) => [user.id, user.name]));
+  const restoreRevision = async (revisionId: string) => {
+    if (!selectedPage?.canWrite || !selectedPage) {
+      return;
+    }
+
+    const response = await fetch(
+      `/api/pages/${selectedPage.id}/revisions/${revisionId}/restore`,
+      { method: "POST" },
+    );
+    const payload = (await response.json()) as { error?: string };
+
+    if (!response.ok) {
+      throw new Error(payload.error ?? "Failed to restore revision.");
+    }
+
+    router.refresh();
+  };
+
   return (
-    <aside className="min-h-0 overflow-y-auto border-l border-stone-200 bg-[#f7f5ef]">
+    <aside className="h-full min-h-0 overflow-y-auto bg-[#f7f5ef]">
       {selectedPage && selectedRevision ? (
         <div>
           <SidebarPanel title="Page overview">
@@ -79,18 +120,56 @@ export function RightSidebar({
                 label="Save behavior"
                 value={selectedPage.canWrite ? "Autosave + manual save" : "Read only"}
               />
+              <InlineMetric
+                label="Created by"
+                value={userNameById.get(selectedPage.createdByUserId) ?? "Unknown user"}
+              />
+              <InlineMetric
+                label="Created on"
+                value={formatCalendarDay(selectedPage.createdAt)}
+              />
+              <InlineMetric
+                label="Last edited by"
+                value={userNameById.get(selectedPage.updatedByUserId) ?? "Unknown user"}
+              />
+              <InlineMetric
+                label="Last edited"
+                value={formatCalendarDay(selectedPage.updatedAt)}
+              />
             </div>
           </SidebarPanel>
 
           <SidebarPanel title="Permissions">
             <PageMetadataForm
               canWrite={selectedPage.canWrite}
+              currentEffectiveReadLevel={selectedPage.effectiveReadLevel}
+              currentEffectiveWriteLevel={selectedPage.effectiveWriteLevel}
               explicitReadLevel={selectedPage.explicitReadLevel}
               explicitWriteLevel={selectedPage.explicitWriteLevel}
+              hasDescendants={selectedPage.hasDescendants}
               hasParent={selectedPage.parentPageId !== null}
               pageId={selectedPage.id}
               workspaceType={currentWorkspaceType}
             />
+          </SidebarPanel>
+
+          <SidebarPanel title="Referenced by">
+            {selectedPageBacklinks.length > 0 ? (
+              <div className="space-y-2">
+                {selectedPageBacklinks.map((backlink) => (
+                  <Link
+                    className="block rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm transition hover:border-stone-300 hover:bg-stone-50"
+                    href={backlink.href}
+                    key={backlink.id}
+                  >
+                    <p className="font-medium text-stone-900">{backlink.title}</p>
+                    <p className="text-xs text-stone-500">{backlink.workspaceLabel}</p>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-stone-500">No visible pages reference this page yet.</p>
+            )}
           </SidebarPanel>
 
           <SidebarPanel title="Recent revisions">
@@ -100,12 +179,27 @@ export function RightSidebar({
                   className="flex items-center justify-between border-b border-stone-200 py-2 text-sm last:border-none"
                   key={revision.id}
                 >
-                  <p className="text-xs font-medium text-stone-900">
-                    Revision {revision.revisionNumber}
-                  </p>
-                  <p className="text-xs text-stone-500">
-                    {revision.createdAt.toLocaleDateString()}
-                  </p>
+                  <div>
+                    <p className="text-xs font-medium text-stone-900">
+                      Revision {revision.revisionNumber}
+                    </p>
+                    <p className="text-[11px] text-stone-500">{revision.createdByUserName}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs text-stone-500">
+                      {formatUtcTimestamp(revision.createdAt)}
+                    </p>
+                    {selectedPage.canWrite && revision.revisionNumber !== selectedRevision.revisionNumber ? (
+                      <Button
+                        onClick={() => void restoreRevision(revision.id)}
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        Restore
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
               ))}
             </div>
@@ -175,4 +269,27 @@ function getReadingWords(value: string) {
   }
 
   return normalized.split(/\s+/).length;
+}
+
+function formatCalendarDay(value: Date) {
+  return new Date(value).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function formatUtcTimestamp(value: Date) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+  })
+    .format(new Date(value))
+    .replace(",", " at");
 }

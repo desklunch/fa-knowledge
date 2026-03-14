@@ -218,17 +218,17 @@ export function CommandPalette({
   return (
     <>
       <Button
-        className="w-full justify-between rounded-xl border border-stone-200 bg-white px-3 text-stone-600 shadow-sm hover:bg-stone-50"
+        className="w-full justify-between "
         onClick={() => setOpen(true)}
         size="default"
         type="button"
-        variant="outline"
+        variant="secondary"
       >
-        <span className="flex items-center gap-2">
+        <span className="flex items-center gap-2 text-stone-400">
           <Search className="h-4 w-4" />
-          Search knowledge
+          Search
         </span>
-        <span className="rounded-md border border-stone-200 bg-stone-50 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-stone-500">
+        <span className="rounded-sm bg-stone-200 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-stone-500">
           {typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac")
             ? "⌘K"
             : "Ctrl+K"}

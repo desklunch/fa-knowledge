@@ -1,9 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { DialogActions, SimpleDialog } from "@/components/ui/simple-dialog";
 import {
   Select,
   SelectContent,
@@ -17,8 +18,11 @@ const INHERIT_VALUE = "__inherit__";
 
 type PageMetadataFormProps = {
   canWrite: boolean;
+  currentEffectiveReadLevel: number | null;
+  currentEffectiveWriteLevel: number | null;
   explicitReadLevel: number | null;
   explicitWriteLevel: number | null;
+  hasDescendants: boolean;
   hasParent: boolean;
   pageId: string;
   workspaceType: "private" | "shared";
@@ -26,8 +30,11 @@ type PageMetadataFormProps = {
 
 export function PageMetadataForm({
   canWrite,
+  currentEffectiveReadLevel,
+  currentEffectiveWriteLevel,
   explicitReadLevel,
   explicitWriteLevel,
+  hasDescendants,
   hasParent,
   pageId,
   workspaceType,
@@ -37,11 +44,28 @@ export function PageMetadataForm({
   const [writeLevel, setWriteLevel] = useState(stringifyLevel(explicitWriteLevel));
   const [saveState, setSaveState] = useState<MetadataSaveState>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [pendingDescendantStrategy, setPendingDescendantStrategy] = useState<
+    "cascade" | "preserve" | null
+  >(null);
 
   const canInherit = workspaceType === "shared" && hasParent;
   const isDirty =
     readLevel !== stringifyLevel(explicitReadLevel) ||
     writeLevel !== stringifyLevel(explicitWriteLevel);
+  const nextReadLevel = parseLevel(readLevel);
+  const nextWriteLevel = parseLevel(writeLevel);
+  const isLoosening =
+    (nextReadLevel !== null &&
+      currentEffectiveReadLevel !== null &&
+      nextReadLevel < currentEffectiveReadLevel) ||
+    (nextWriteLevel !== null &&
+      currentEffectiveWriteLevel !== null &&
+      nextWriteLevel < currentEffectiveWriteLevel);
+  const isTightening =
+    (nextReadLevel !== null &&
+      (currentEffectiveReadLevel === null || nextReadLevel > currentEffectiveReadLevel)) ||
+    (nextWriteLevel !== null &&
+      (currentEffectiveWriteLevel === null || nextWriteLevel > currentEffectiveWriteLevel));
   const readOptions = useMemo(
     () => buildLevelOptions(canInherit),
     [canInherit],
@@ -50,6 +74,14 @@ export function PageMetadataForm({
     () => buildLevelOptions(canInherit),
     [canInherit],
   );
+
+  useEffect(() => {
+    setReadLevel(stringifyLevel(explicitReadLevel));
+    setWriteLevel(stringifyLevel(explicitWriteLevel));
+    setSaveState("idle");
+    setSaveError(null);
+    setPendingDescendantStrategy(null);
+  }, [explicitReadLevel, explicitWriteLevel, pageId]);
 
   if (workspaceType === "private") {
     return (
@@ -60,8 +92,15 @@ export function PageMetadataForm({
     );
   }
 
-  const handleSave = async () => {
+  const handleSave = async (overrideDescendantStrategy?: "cascade" | "preserve") => {
     if (!canWrite || !isDirty) {
+      return;
+    }
+
+    const descendantStrategy = overrideDescendantStrategy ?? pendingDescendantStrategy ?? undefined;
+
+    if (hasDescendants && isLoosening && !descendantStrategy) {
+      setPendingDescendantStrategy("preserve");
       return;
     }
 
@@ -75,8 +114,12 @@ export function PageMetadataForm({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          explicitReadLevel: parseLevel(readLevel),
-          explicitWriteLevel: parseLevel(writeLevel),
+          explicitReadLevel: nextReadLevel,
+          explicitWriteLevel: nextWriteLevel,
+          descendantStrategy:
+            hasDescendants
+              ? descendantStrategy ?? (isTightening ? "cascade" : undefined)
+              : undefined,
         }),
       });
       const payload = (await response.json()) as { error?: string };
@@ -86,6 +129,7 @@ export function PageMetadataForm({
       }
 
       setSaveState("saved");
+      setPendingDescendantStrategy(null);
       router.refresh();
     } catch (error) {
       setSaveError(
@@ -138,6 +182,11 @@ export function PageMetadataForm({
         </Select>
       </label>
       </div>
+      {isDirty && hasDescendants && isTightening ? (
+        <p className="text-sm text-stone-600">
+          This stricter setting will also raise descendant restrictions to stay aligned.
+        </p>
+      ) : null}
       {saveError ? <p className="text-sm text-red-700">{saveError}</p> : null}
 
       <div className="flex items-center justify-between gap-3">
@@ -160,6 +209,41 @@ export function PageMetadataForm({
           {saveState === "saving" ? "Saving..." : "Save"}
         </Button>
       </div>
+
+      <SimpleDialog
+        description="This change would make the page less restrictive. Do you want descendants that inherit from this page to loosen too, or should they stay unchanged?"
+        open={hasDescendants && pendingDescendantStrategy !== null}
+        title="Apply looser permissions"
+      >
+        <DialogActions className="justify-between">
+          <Button
+            onClick={() => setPendingDescendantStrategy(null)}
+            type="button"
+            variant="ghost"
+          >
+            Cancel
+          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={() => {
+                void handleSave("preserve");
+              }}
+              type="button"
+              variant="outline"
+            >
+              Keep descendants unchanged
+            </Button>
+            <Button
+              onClick={() => {
+                void handleSave("cascade");
+              }}
+              type="button"
+            >
+              Apply to descendants
+            </Button>
+          </div>
+        </DialogActions>
+      </SimpleDialog>
     </div>
   );
 }

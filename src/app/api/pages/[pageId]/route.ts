@@ -13,6 +13,12 @@ const savePageSchema = z.object({
   editorDocJson: z.unknown().nullable().optional(),
 });
 
+const deletePageSchema = z
+  .object({
+    mode: z.enum(["delete-subtree", "keep-descendants"]).optional(),
+  })
+  .optional();
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ pageId: string }> },
@@ -55,7 +61,7 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ pageId: string }> },
 ) {
   const actingUserId = await getImpersonatedUserId();
@@ -65,10 +71,19 @@ export async function DELETE(
   }
 
   try {
+    const body =
+      request.headers.get("content-length") === "0" ? undefined : await request.json().catch(() => undefined);
+    const parsedBody = deletePageSchema.safeParse(body);
+
+    if (!parsedBody.success) {
+      return NextResponse.json({ error: "Invalid delete payload." }, { status: 400 });
+    }
+
     const { pageId } = await params;
     const result = await deletePage({
       actingUserId,
       pageId,
+      mode: parsedBody.data?.mode,
     });
 
     return NextResponse.json(result);

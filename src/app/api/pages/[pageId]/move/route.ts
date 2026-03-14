@@ -7,6 +7,10 @@ import { getImpersonatedUserId } from "@/lib/impersonation";
 const movePageSchema = z.object({
   destinationParentPageId: z.string().uuid().nullable().optional(),
   destinationIndex: z.number().int().min(0).nullable().optional(),
+  destinationWorkspaceId: z.string().uuid().nullable().optional(),
+  weakeningStrategy: z.enum(["inherit", "preserve"]).optional(),
+  destinationExplicitReadLevel: z.number().int().min(1).max(3).nullable().optional(),
+  destinationExplicitWriteLevel: z.number().int().min(1).max(3).nullable().optional(),
 });
 
 export async function POST(
@@ -33,6 +37,10 @@ export async function POST(
       pageId,
       destinationParentPageId: parsedBody.data.destinationParentPageId ?? null,
       destinationIndex: parsedBody.data.destinationIndex ?? null,
+      destinationWorkspaceId: parsedBody.data.destinationWorkspaceId ?? null,
+      weakeningStrategy: parsedBody.data.weakeningStrategy,
+      destinationExplicitReadLevel: parsedBody.data.destinationExplicitReadLevel ?? null,
+      destinationExplicitWriteLevel: parsedBody.data.destinationExplicitWriteLevel ?? null,
     });
 
     return NextResponse.json(result);

@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { DndProvider, useDrag, useDrop } from "react-dnd";
-import { HTML5Backend } from "react-dnd-html5-backend";
+import { useDrag, useDrop } from "react-dnd";
 import { startTransition, useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
@@ -12,6 +11,7 @@ import {
   File,
   FilePlus2,
   FolderTree,
+  History,
   MoreVertical,
   Pencil,
   Plus,
@@ -38,6 +38,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { DialogActions, SimpleDialog } from "@/components/ui/simple-dialog";
 import type { VisiblePageNode } from "@/lib/knowledge-base";
 import { cn } from "@/lib/utils";
 
@@ -73,6 +74,10 @@ type DropPosition = "before" | "after" | "inside";
 type MoveTarget = {
   destinationParentPageId: string | null;
   destinationIndex: number;
+  destinationWorkspaceId?: string | null;
+  weakeningStrategy?: "inherit" | "preserve";
+  destinationExplicitReadLevel?: number | null;
+  destinationExplicitWriteLevel?: number | null;
 };
 
 const DRAG_TYPE = "sidebar-page";
@@ -90,6 +95,21 @@ export function AppSidebar({
   const [workspaceTrees, setWorkspaceTrees] = useState(visibleWorkspaces);
   const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({});
   const [editingPageId, setEditingPageId] = useState<string | null>(null);
+  const [pendingDeleteNode, setPendingDeleteNode] = useState<VisiblePageNode | null>(null);
+  const [pendingDeleteMode, setPendingDeleteMode] = useState<
+    "delete-subtree" | "keep-descendants"
+  >("delete-subtree");
+  const [pendingMoveResolution, setPendingMoveResolution] = useState<{
+    pageId: string;
+    pageTitle: string;
+    target: MoveTarget;
+    workspaceId: string;
+  } | null>(null);
+  const [pendingCrossWorkspaceMove, setPendingCrossWorkspaceMove] = useState<{
+    destinationWorkspaceId: string;
+    destinationWorkspaceType: "private" | "shared";
+    node: VisiblePageNode;
+  } | null>(null);
   const [, setStatus] = useState<{ kind: "error" | "success"; message: string } | null>(
     null,
   );
@@ -135,7 +155,7 @@ export function AppSidebar({
     nextParams.delete("status");
     nextParams.delete("message");
 
-    return `${pathname}?${nextParams.toString()}`;
+    return `/?${nextParams.toString()}`;
   };
 
   const refreshData = () => {
@@ -187,26 +207,6 @@ export function AppSidebar({
 
       return nextState;
     });
-  };
-
-  const mutateWorkspaceTrees = async (
-    updater: (current: WorkspaceTree[]) => WorkspaceTree[],
-    action: () => Promise<void>,
-  ) => {
-    const previousTrees = workspaceTrees;
-    const nextTrees = updater(previousTrees);
-    setWorkspaceTrees(nextTrees);
-
-    try {
-      await action();
-      refreshData();
-    } catch (error) {
-      setWorkspaceTrees(previousTrees);
-      setStatus({
-        kind: "error",
-        message: error instanceof Error ? error.message : "Sidebar action failed.",
-      });
-    }
   };
 
   const handleCreatePage = async ({
@@ -278,12 +278,23 @@ export function AppSidebar({
   };
 
   const handleDeletePage = async (node: VisiblePageNode) => {
-    if (!window.confirm(`Delete "${node.title}" and its subtree?`)) {
+    setPendingDeleteNode(node);
+    setPendingDeleteMode("delete-subtree");
+  };
+
+  const confirmDeletePage = async () => {
+    if (!pendingDeleteNode) {
       return;
     }
 
-    const response = await fetch(`/api/pages/${node.id}`, {
+    const response = await fetch(`/api/pages/${pendingDeleteNode.id}`, {
       method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        mode: pendingDeleteMode,
+      }),
     });
 
     if (!response.ok) {
@@ -293,10 +304,11 @@ export function AppSidebar({
 
     const payload = (await response.json()) as { redirectPageId: string | null };
 
-    if (selectedPageId === node.id) {
+    if (selectedPageId === pendingDeleteNode.id) {
       router.push(payload.redirectPageId ? pageHref(payload.redirectPageId) : pathname);
     }
 
+    setPendingDeleteNode(null);
     setStatus({
       kind: "success",
       message: "Page deleted.",
@@ -364,50 +376,78 @@ export function AppSidebar({
     pageId: string,
     target: MoveTarget,
   ) => {
-    await mutateWorkspaceTrees(
-      (current) =>
-        current.map((workspace) =>
-          workspace.workspace.id === workspaceId
-            ? {
-                ...workspace,
-                pages: moveNodeInTree(
-                  workspace.pages,
-                  pageId,
-                  target.destinationParentPageId,
-                  target.destinationIndex,
-                ),
-              }
-            : workspace,
-        ),
-      async () => {
-        const response = await fetch(`/api/pages/${pageId}/move`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(target),
-        });
-
-        if (!response.ok) {
-          const payload = (await response.json()) as { error?: string };
-          throw new Error(payload.error ?? "Failed to move page.");
-        }
-
-        if (target.destinationParentPageId) {
-          setExpanded(getPageExpansionKey(target.destinationParentPageId), true);
-          setExpandedForAncestors(workspaceId, target.destinationParentPageId);
-        }
-
-        setStatus({
-          kind: "success",
-          message: "Page moved.",
-        });
+    console.debug("[sidebar] movePage request", {
+      pageId,
+      sourceWorkspaceId: workspaceId,
+      target,
+    });
+    const response = await fetch(`/api/pages/${pageId}/move`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
       },
-    );
+      body: JSON.stringify(target),
+    });
+    const payload = (await response.json()) as { error?: string };
+
+    if (!response.ok) {
+      if (payload.error?.includes("permission resolution")) {
+        const pageTitle =
+          workspaceTrees
+            .flatMap((workspace) => flattenVisibleNodes(workspace.pages))
+            .find((page) => page.id === pageId)?.title ?? "Page";
+
+        setPendingMoveResolution({
+          pageId,
+          pageTitle,
+          target,
+          workspaceId,
+        });
+        return;
+      }
+
+      throw new Error(payload.error ?? "Failed to move page.");
+    }
+
+    setPendingMoveResolution(null);
+
+    if (target.destinationParentPageId) {
+      setExpanded(getPageExpansionKey(target.destinationParentPageId), true);
+      setExpandedForAncestors(
+        target.destinationWorkspaceId ?? workspaceId,
+        target.destinationParentPageId,
+      );
+    }
+
+    setStatus({
+      kind: "success",
+      message: "Page moved.",
+    });
+    refreshData();
+  };
+
+  const confirmCrossWorkspaceMove = async () => {
+    if (!pendingCrossWorkspaceMove) {
+      return;
+    }
+
+    await handleMovePage(pendingCrossWorkspaceMove.node.workspaceId, pendingCrossWorkspaceMove.node.id, {
+      destinationParentPageId: null,
+      destinationIndex: 0,
+      destinationWorkspaceId: pendingCrossWorkspaceMove.destinationWorkspaceId,
+      destinationExplicitReadLevel:
+        pendingCrossWorkspaceMove.destinationWorkspaceType === "shared"
+          ? currentUser.permissionLevel
+          : null,
+      destinationExplicitWriteLevel:
+        pendingCrossWorkspaceMove.destinationWorkspaceType === "shared"
+          ? currentUser.permissionLevel
+          : null,
+    });
+    setPendingCrossWorkspaceMove(null);
   };
 
   return (
-    <DndProvider backend={HTML5Backend}>
       <aside className="flex h-full min-h-0 min-w-0 flex-col border-r border-stone-200 bg-white/90 ">
         {/* <div className="border-b border-stone-200 ">
           <div className="bg-white/90 px-3 py-3 ">
@@ -561,15 +601,25 @@ export function AppSidebar({
                               onDuplicate={handleDuplicatePage}
                               onMove={handleMovePage}
                               onMoveToRoot={handleMoveToRoot}
+                              onMoveToWorkspace={(targetWorkspaceId, targetWorkspaceType) =>
+                                setPendingCrossWorkspaceMove({
+                                  destinationWorkspaceId: targetWorkspaceId,
+                                  destinationWorkspaceType: targetWorkspaceType,
+                                  node,
+                                })
+                              }
                               onRename={handleRenamePage}
                               onStartRename={(pageId) => setEditingPageId(pageId)}
                               onStopRename={() => setEditingPageId(null)}
                               pageHref={pageHref}
                               editingPageId={editingPageId}
+                              personalWorkspaceId={personalWorkspace?.id ?? null}
                               selectedPageId={selectedPageId}
                               setExpanded={setExpanded}
+                              sharedWorkspaceId={sharedWorkspace?.id ?? null}
                               siblingNodes={pages}
                               workspaceId={workspace.id}
+                              workspaceType={workspace.type}
                             />
                           ))
                         )}
@@ -579,6 +629,20 @@ export function AppSidebar({
                           void handleMovePage(workspace.id, item.id, {
                             destinationParentPageId: null,
                             destinationIndex: pages.filter((candidate) => candidate.id !== item.id).length,
+                            destinationWorkspaceId:
+                              item.workspaceId === workspace.id ? null : workspace.id,
+                            destinationExplicitReadLevel:
+                              item.workspaceId === workspace.id
+                                ? undefined
+                                : workspace.type === "shared"
+                                  ? currentUser.permissionLevel
+                                  : null,
+                            destinationExplicitWriteLevel:
+                              item.workspaceId === workspace.id
+                                ? undefined
+                                : workspace.type === "shared"
+                                  ? currentUser.permissionLevel
+                                  : null,
                           })
                         }
                         workspaceId={workspace.id}
@@ -588,10 +652,162 @@ export function AppSidebar({
                 </Collapsible>
               );
             })}
+
+            <div className="border-b border-stone-200 bg-white/90 p-2">
+              <Link
+                className={cn(
+                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition",
+                  pathname === "/recent"
+                    ? "bg-stone-900 "
+                    : " hover:bg-stone-100",
+                )}
+                href="/recent"
+              >
+                <History
+                  className={cn(
+                    "h-4 w-4",
+                    pathname === "/recent" ? "text-stone-200" : "text-stone-500",
+                  )}
+                />
+                <span className={cn(
+                    "font-medium",
+                    pathname === "/recent" ? "text-stone-200" : "text-stone-500",
+                  )}>Recent</span>
+              </Link>
+            </div>
           </div>
         </ScrollArea>
+        <SimpleDialog
+          description={
+            pendingDeleteNode
+              ? `Choose whether deleting "${pendingDeleteNode.title}" should also delete its descendant pages or keep them by moving them up one level.`
+              : undefined
+          }
+          open={pendingDeleteNode !== null}
+          title="Delete page"
+        >
+          <div className="space-y-3">
+            <button
+              className={cn(
+                "w-full rounded-xl border px-4 py-3 text-left text-sm transition",
+                pendingDeleteMode === "delete-subtree"
+                  ? "border-stone-900 bg-stone-900 text-white"
+                  : "border-stone-200 bg-white text-stone-700 hover:border-stone-300",
+              )}
+              onClick={() => setPendingDeleteMode("delete-subtree")}
+              type="button"
+            >
+              Delete this page and all descendants
+            </button>
+            <button
+              className={cn(
+                "w-full rounded-xl border px-4 py-3 text-left text-sm transition",
+                pendingDeleteMode === "keep-descendants"
+                  ? "border-stone-900 bg-stone-900 text-white"
+                  : "border-stone-200 bg-white text-stone-700 hover:border-stone-300",
+              )}
+              onClick={() => setPendingDeleteMode("keep-descendants")}
+              type="button"
+            >
+              Delete only this page and keep descendants
+            </button>
+          </div>
+          <DialogActions>
+            <Button
+              onClick={() => setPendingDeleteNode(null)}
+              type="button"
+              variant="ghost"
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-red-700 text-white hover:bg-red-800"
+              onClick={() => void confirmDeletePage()}
+              type="button"
+            >
+              Delete page
+            </Button>
+          </DialogActions>
+        </SimpleDialog>
+        <SimpleDialog
+          description={
+            pendingMoveResolution
+              ? `Moving "${pendingMoveResolution.pageTitle}" would make it less restrictive than it is now. Choose whether it should inherit the new parent permissions or keep its current stricter restriction level.`
+              : undefined
+          }
+          open={pendingMoveResolution !== null}
+          title="Resolve shared-page permissions"
+        >
+          <DialogActions className="justify-between">
+            <Button
+              onClick={() => setPendingMoveResolution(null)}
+              type="button"
+              variant="ghost"
+            >
+              Cancel
+            </Button>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => {
+                  if (!pendingMoveResolution) return;
+                  void handleMovePage(
+                    pendingMoveResolution.workspaceId,
+                    pendingMoveResolution.pageId,
+                    {
+                      ...pendingMoveResolution.target,
+                      weakeningStrategy: "preserve",
+                    },
+                  );
+                }}
+                type="button"
+                variant="outline"
+              >
+                Keep stricter permissions
+              </Button>
+              <Button
+                onClick={() => {
+                  if (!pendingMoveResolution) return;
+                  void handleMovePage(
+                    pendingMoveResolution.workspaceId,
+                    pendingMoveResolution.pageId,
+                    {
+                      ...pendingMoveResolution.target,
+                      weakeningStrategy: "inherit",
+                    },
+                  );
+                }}
+                type="button"
+              >
+                Inherit new parent permissions
+              </Button>
+            </div>
+          </DialogActions>
+        </SimpleDialog>
+        <SimpleDialog
+          description={
+            pendingCrossWorkspaceMove
+              ? pendingCrossWorkspaceMove.destinationWorkspaceType === "shared"
+                ? `Move "${pendingCrossWorkspaceMove.node.title}" into the shared workspace root using your Level ${currentUser.permissionLevel} permissions as the default shared-page setting?`
+                : `Move "${pendingCrossWorkspaceMove.node.title}" into your personal workspace root?`
+              : undefined
+          }
+          open={pendingCrossWorkspaceMove !== null}
+          title="Move page to another workspace"
+        >
+          <DialogActions>
+            <Button
+              onClick={() => setPendingCrossWorkspaceMove(null)}
+              type="button"
+              variant="ghost"
+            >
+              Cancel
+            </Button>
+            <Button onClick={() => void confirmCrossWorkspaceMove()} type="button">
+              Move page
+            </Button>
+          </DialogActions>
+        </SimpleDialog>
       </aside>
-    </DndProvider>
   );
 }
 
@@ -606,14 +822,18 @@ function SidebarPageNode({
   onDuplicate,
   onMove,
   onMoveToRoot,
+  onMoveToWorkspace,
   onRename,
   onStartRename,
   onStopRename,
   pageHref,
+  personalWorkspaceId,
   selectedPageId,
   setExpanded,
+  sharedWorkspaceId,
   siblingNodes,
   workspaceId,
+  workspaceType,
 }: {
   depth: number;
   editingPageId: string | null;
@@ -625,14 +845,21 @@ function SidebarPageNode({
   onDuplicate: (node: VisiblePageNode) => Promise<void>;
   onMove: (workspaceId: string, pageId: string, target: MoveTarget) => Promise<void>;
   onMoveToRoot: (node: VisiblePageNode) => Promise<void>;
+  onMoveToWorkspace: (
+    workspaceId: string,
+    workspaceType: "private" | "shared",
+  ) => void;
   onRename: (node: VisiblePageNode, nextTitle: string) => Promise<void>;
   onStartRename: (pageId: string) => void;
   onStopRename: () => void;
   pageHref: (pageId: string) => string;
+  personalWorkspaceId: string | null;
   selectedPageId: string | null;
   setExpanded: (key: string, value: boolean) => void;
+  sharedWorkspaceId: string | null;
   siblingNodes: VisiblePageNode[];
   workspaceId: string;
+  workspaceType: "private" | "shared";
 }) {
   const isExpanded = expandedKeys[getPageExpansionKey(node.id)] ?? true;
   const hasChildren = node.children.length > 0;
@@ -640,6 +867,7 @@ function SidebarPageNode({
   const isEditing = editingPageId === node.id;
   const rowRef = useRef<HTMLDivElement | null>(null);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const renameHasFocusedRef = useRef(false);
   const renameSubmissionRef = useRef(false);
   const expandTimeoutRef = useRef<number | null>(null);
   const [hoverPosition, setHoverPosition] = useState<DropPosition | null>(null);
@@ -649,6 +877,7 @@ function SidebarPageNode({
     if (!isEditing) {
       setDraftTitle(node.title);
       renameSubmissionRef.current = false;
+      renameHasFocusedRef.current = false;
       return;
     }
 
@@ -835,8 +1064,17 @@ function SidebarPageNode({
                   "min-w-0 flex-1 rounded-md border border-stone-300 bg-white px-2 py-1 text-sm outline-none ring-0",
                   isSelected && "border-white/30 bg-white text-stone-950",
                 )}
-                onBlur={() => void commitRename()}
+                onBlur={() => {
+                  if (!renameHasFocusedRef.current) {
+                    return;
+                  }
+
+                  void commitRename();
+                }}
                 onChange={(event) => setDraftTitle(event.target.value)}
+                onFocus={() => {
+                  renameHasFocusedRef.current = true;
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter") {
                     event.preventDefault();
@@ -881,8 +1119,12 @@ function SidebarPageNode({
               onDelete={onDelete}
               onDuplicate={onDuplicate}
               onMoveToRoot={onMoveToRoot}
+              onMoveToWorkspace={onMoveToWorkspace}
               onRename={() => onStartRename(node.id)}
+              personalWorkspaceId={personalWorkspaceId}
               selected={isSelected}
+              sharedWorkspaceId={sharedWorkspaceId}
+              workspaceType={workspaceType}
             />
           </div>
         </div>
@@ -902,15 +1144,19 @@ function SidebarPageNode({
                     onDuplicate={onDuplicate}
               onMove={onMove}
               onMoveToRoot={onMoveToRoot}
+              onMoveToWorkspace={onMoveToWorkspace}
               onRename={onRename}
               onStartRename={onStartRename}
               onStopRename={onStopRename}
               pageHref={pageHref}
               editingPageId={editingPageId}
+              personalWorkspaceId={personalWorkspaceId}
               selectedPageId={selectedPageId}
               setExpanded={setExpanded}
+              sharedWorkspaceId={sharedWorkspaceId}
               siblingNodes={node.children}
               workspaceId={workspaceId}
+              workspaceType={workspaceType}
             />
           ))
               : null}
@@ -928,8 +1174,12 @@ function PageActionMenu({
   onDelete,
   onDuplicate,
   onMoveToRoot,
+  onMoveToWorkspace,
   onRename,
+  personalWorkspaceId,
   selected,
+  sharedWorkspaceId,
+  workspaceType,
 }: {
   node: VisiblePageNode;
   onCopyLink: (pageId: string) => Promise<void>;
@@ -937,8 +1187,15 @@ function PageActionMenu({
   onDelete: (node: VisiblePageNode) => Promise<void>;
   onDuplicate: (node: VisiblePageNode) => Promise<void>;
   onMoveToRoot: (node: VisiblePageNode) => Promise<void>;
+  onMoveToWorkspace: (
+    workspaceId: string,
+    workspaceType: "private" | "shared",
+  ) => void;
   onRename: () => void;
+  personalWorkspaceId: string | null;
   selected: boolean;
+  sharedWorkspaceId: string | null;
+  workspaceType: "private" | "shared";
 }) {
   return (
     <DropdownMenu>
@@ -980,7 +1237,9 @@ function PageActionMenu({
         <DropdownMenuItem
           disabled={!node.canWrite}
           onSelect={() => {
-            onRename();
+            window.setTimeout(() => {
+              onRename();
+            }, 0);
           }}
         >
           <Pencil className="h-4 w-4" />
@@ -990,6 +1249,24 @@ function PageActionMenu({
           <FolderTree className="h-4 w-4" />
           Move to workspace root
         </DropdownMenuItem>
+        {workspaceType !== "private" && personalWorkspaceId ? (
+          <DropdownMenuItem
+            disabled={!node.canWrite}
+            onSelect={() => onMoveToWorkspace(personalWorkspaceId, "private")}
+          >
+            <FolderTree className="h-4 w-4" />
+            Move to Personal workspace
+          </DropdownMenuItem>
+        ) : null}
+        {workspaceType !== "shared" && sharedWorkspaceId ? (
+          <DropdownMenuItem
+            disabled={!node.canWrite}
+            onSelect={() => onMoveToWorkspace(sharedWorkspaceId, "shared")}
+          >
+            <FolderTree className="h-4 w-4" />
+            Move to Shared workspace
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuItem disabled={!node.canWrite} onSelect={() => void onDuplicate(node)}>
           <Copy className="h-4 w-4" />
@@ -1024,10 +1301,14 @@ function WorkspaceDropZone({
   onDrop: (item: DragItem) => void;
   workspaceId: string;
 }) {
-  const [{ isOver, canDrop }, dropRef] = useDrop(
+  const [{ isOver, canDrop }, dropRef] = useDrop<
+    DragItem,
+    void,
+    { canDrop: boolean; isOver: boolean }
+  >(
     () => ({
       accept: DRAG_TYPE,
-      canDrop: (item: DragItem) => item.workspaceId === workspaceId,
+      canDrop: () => true,
       collect: (monitor) => ({
         canDrop: monitor.canDrop(),
         isOver: monitor.isOver({ shallow: true }),
@@ -1111,6 +1392,10 @@ function getAncestorIds(nodes: VisiblePageNode[], pageId: string): string[] | nu
   return null;
 }
 
+function flattenVisibleNodes(nodes: VisiblePageNode[]): VisiblePageNode[] {
+  return nodes.flatMap((node) => [node, ...flattenVisibleNodes(node.children)]);
+}
+
 function getDropPosition(
   element: HTMLElement,
   clientOffset: { x: number; y: number } | null,
@@ -1164,139 +1449,4 @@ function getTargetForDrop(
     destinationParentPageId: node.parentPageId,
     destinationIndex,
   };
-}
-
-function moveNodeInTree(
-  pages: VisiblePageNode[],
-  pageId: string,
-  destinationParentPageId: string | null,
-  destinationIndex: number,
-) {
-  const [node, prunedPages] = removeNode(pages, pageId);
-
-  if (!node) {
-    return pages;
-  }
-
-  const destinationParent = destinationParentPageId
-    ? findNode(prunedPages, destinationParentPageId)
-    : null;
-  const nextDepth = destinationParent ? destinationParent.depth + 1 : 0;
-  const normalizedNode = updateSubtreeDepth({
-    node: {
-      ...node,
-      parentPageId: destinationParentPageId,
-    },
-    nextDepth,
-  });
-
-  return reindexTree(insertNode(prunedPages, normalizedNode, destinationParentPageId, destinationIndex));
-}
-
-function removeNode(
-  pages: VisiblePageNode[],
-  pageId: string,
-): [VisiblePageNode | null, VisiblePageNode[]] {
-  let removedNode: VisiblePageNode | null = null;
-
-  const nextPages = pages
-    .filter((node) => {
-      if (node.id === pageId) {
-        removedNode = node;
-        return false;
-      }
-
-      return true;
-    })
-    .map((node) => {
-      const [removedChild, nextChildren] = removeNode(node.children, pageId);
-
-      if (removedChild) {
-        removedNode = removedChild;
-        return {
-          ...node,
-          children: nextChildren,
-        };
-      }
-
-      return node;
-    });
-
-  return [removedNode, nextPages];
-}
-
-function insertNode(
-  pages: VisiblePageNode[],
-  node: VisiblePageNode,
-  destinationParentPageId: string | null,
-  destinationIndex: number,
-): VisiblePageNode[] {
-  if (destinationParentPageId === null) {
-    const nextPages = [...pages];
-    nextPages.splice(Math.min(destinationIndex, nextPages.length), 0, node);
-    return nextPages;
-  }
-
-  return pages.map((page) => {
-    if (page.id === destinationParentPageId) {
-      const nextChildren = [...page.children];
-      nextChildren.splice(Math.min(destinationIndex, nextChildren.length), 0, node);
-
-      return {
-        ...page,
-        children: nextChildren,
-      };
-    }
-
-    return {
-      ...page,
-      children: insertNode(page.children, node, destinationParentPageId, destinationIndex),
-    };
-  });
-}
-
-function reindexTree(nodes: VisiblePageNode[]): VisiblePageNode[] {
-  return nodes.map((node, index) => ({
-    ...node,
-    sortOrder: index,
-    children: reindexTree(node.children),
-  }));
-}
-
-function updateSubtreeDepth({
-  node,
-  nextDepth,
-}: {
-  node: VisiblePageNode;
-  nextDepth: number;
-}): VisiblePageNode {
-  return {
-    ...node,
-    depth: nextDepth,
-    children: node.children.map((child) =>
-      updateSubtreeDepth({
-        node: {
-          ...child,
-          parentPageId: node.id,
-        },
-        nextDepth: nextDepth + 1,
-      }),
-    ),
-  };
-}
-
-function findNode(nodes: VisiblePageNode[], pageId: string): VisiblePageNode | null {
-  for (const node of nodes) {
-    if (node.id === pageId) {
-      return node;
-    }
-
-    const childNode = findNode(node.children, pageId);
-
-    if (childNode) {
-      return childNode;
-    }
-  }
-
-  return null;
 }

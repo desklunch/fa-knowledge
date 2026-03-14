@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { PageEditor } from "@/components/page-editor";
+import { RightSidebarToggleButton } from "@/components/right-sidebar-layout";
 
 type SaveState = "saved" | "saving" | "unsaved" | "error";
 
@@ -227,6 +228,7 @@ export function EditablePageForm({
             >
               Save version
             </button>
+            <RightSidebarToggleButton />
           </div>
         </div>
         {saveState === "error" ? (

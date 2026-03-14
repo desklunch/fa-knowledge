@@ -17,6 +17,13 @@ import {
 
 export const userTypeEnum = pgEnum("user_type", ["human", "agent"]);
 export const workspaceTypeEnum = pgEnum("workspace_type", ["private", "shared"]);
+export const pageActivityEventTypeEnum = pgEnum("page_activity_event_type", [
+  "page_created",
+  "page_edited",
+  "page_renamed",
+  "page_moved",
+  "page_deleted",
+]);
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -150,8 +157,39 @@ export const pageEditSessions = pgTable(
   ],
 );
 
+export const pageActivityEvents = pgTable(
+  "page_activity_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    pageId: uuid("page_id").references(() => pages.id, { onDelete: "set null" }),
+    actorUserId: uuid("actor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    eventType: pageActivityEventTypeEnum("event_type").notNull(),
+    pageTitle: text("page_title").notNull(),
+    previousPageTitle: text("previous_page_title"),
+    parentPageId: uuid("parent_page_id").references((): AnyPgColumn => pages.id, {
+      onDelete: "set null",
+    }),
+    parentPageTitle: text("parent_page_title"),
+    revisionNumber: integer("revision_number"),
+    effectiveReadLevel: integer("effective_read_level"),
+    effectiveWriteLevel: integer("effective_write_level"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("page_activity_events_workspace_id_idx").on(table.workspaceId),
+    index("page_activity_events_page_id_idx").on(table.pageId),
+    index("page_activity_events_created_at_idx").on(table.createdAt),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type Page = typeof pages.$inferSelect;
 export type PageRevision = typeof pageRevisions.$inferSelect;
 export type PageEditSession = typeof pageEditSessions.$inferSelect;
+export type PageActivityEvent = typeof pageActivityEvents.$inferSelect;
