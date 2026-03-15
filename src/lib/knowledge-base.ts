@@ -214,6 +214,38 @@ export function resetFallbackKnowledgeBase() {
   fallbackStore = buildSeedSnapshot();
 }
 
+export async function getKnowledgeBaseSnapshotForTests() {
+  return getSnapshot();
+}
+
+export async function clearPageEditSessionsForUser(input: {
+  pageId: string;
+  userId: string;
+}) {
+  if (!db) {
+    fallbackStore = {
+      ...fallbackStore,
+      editSessions: fallbackStore.editSessions.filter(
+        (session) =>
+          !(
+            session.pageId === input.pageId &&
+            session.userId === input.userId
+          ),
+      ),
+    };
+    return;
+  }
+
+  await db
+    .delete(pageEditSessions)
+    .where(
+      and(
+        eq(pageEditSessions.pageId, input.pageId),
+        eq(pageEditSessions.userId, input.userId),
+      ),
+    );
+}
+
 async function getSnapshot(): Promise<KnowledgeBaseSnapshot> {
   if (!db) {
     return fallbackStore;

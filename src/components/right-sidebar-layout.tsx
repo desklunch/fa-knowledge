@@ -60,16 +60,16 @@ export function RightSidebarLayout({
         {header ? <div className="shrink-0">{header}</div> : null}
         <div
           className={cn(
-            "grid min-h-0 min-w-0 flex-1 transition-[grid-template-columns]",
+            "grid min-h-0 min-w-0 flex-1 overflow-hidden transition-[grid-template-columns]",
             collapsed
               ? "grid-cols-[minmax(0,1fr)_0px]"
               : "grid-cols-[minmax(0,1fr)_320px]",
           )}
         >
-          <div className="flex min-h-0 min-w-0 flex-col">{children}</div>
+          <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">{children}</div>
           <div
             className={cn(
-              "h-full min-h-0 min-w-0 transition-[width,opacity]",
+              "h-full min-h-0 min-w-0 overflow-hidden transition-[width,opacity]",
               collapsed
                 ? "w-0 overflow-hidden border-l-0 opacity-0"
                 : "w-[320px] border-l border-stone-200 opacity-100",

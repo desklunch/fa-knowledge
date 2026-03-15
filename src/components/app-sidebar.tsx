@@ -61,6 +61,7 @@ type AppSidebarProps = {
   };
   searchItems: CommandPalettePageItem[];
   selectedPageId: string | null;
+  collapsed?: boolean;
   visibleWorkspaces: WorkspaceTree[];
 };
 
@@ -84,6 +85,7 @@ const DRAG_TYPE = "sidebar-page";
 const STORAGE_KEY = "fa-knowledge-sidebar-expanded";
 
 export function AppSidebar({
+  collapsed = false,
   currentUser,
   searchItems,
   selectedPageId,
@@ -113,6 +115,7 @@ export function AppSidebar({
   const [, setStatus] = useState<{ kind: "error" | "success"; message: string } | null>(
     null,
   );
+  const [isFloatingOpen, setIsFloatingOpen] = useState(false);
 
   useEffect(() => {
     setWorkspaceTrees(visibleWorkspaces);
@@ -166,6 +169,9 @@ export function AppSidebar({
 
   const navigateToHref = (href: string) => {
     router.push(href);
+    if (collapsed) {
+      setIsFloatingOpen(false);
+    }
   };
 
   const personalWorkspace = visibleWorkspaces.find(
@@ -448,31 +454,64 @@ export function AppSidebar({
   };
 
   return (
-      <aside className="flex h-full min-h-0 min-w-0 flex-col border-r border-stone-200 bg-white/90 ">
-        {/* <div className="border-b border-stone-200 ">
-          <div className="bg-white/90 px-3 py-3 ">
-          <div>
-                <h2 className="text-sm font-semibold text-stone-950">{currentUser.name}</h2>
-                <p className=" text-xs text-stone-600 uppercase">
-                  Level {currentUser.permissionLevel} · {currentUser.userType}
-                </p>
-              </div>
-  
-            {status ? (
-              <div
-                className={cn(iser
-                  "mt-3 rounded-xl border px-3 py-2 text-xs",
-                  status.kind === "error"
-                    ? "border-red-200 bg-red-50 text-red-700"
-                    : "border-emerald-200 bg-emerald-50 text-emerald-700",
-                )}
-              >
-                {status.message}
-              </div>
-            ) : null}
+    <div
+      className="relative h-full"
+      onMouseEnter={() => {
+        if (collapsed) {
+          setIsFloatingOpen(true);
+        }
+      }}
+      onMouseLeave={() => {
+        if (collapsed) {
+          setIsFloatingOpen(false);
+        }
+      }}
+    >
+      <aside
+        className={cn(
+          "flex h-full min-h-0 min-w-0 flex-col border-r border-stone-200 bg-white/90",
+          collapsed ? "w-[48px]" : "w-full",
+          collapsed && isFloatingOpen && "absolute left-0 top-0 z-30 w-[280px] shadow-xl",
+        )}
+      >
+        {collapsed && !isFloatingOpen ? (
+          <div className="flex h-full flex-col items-center">
+            <div className="px-3 py-1">
+              <CommandPalette
+                compact
+                currentWorkspaceOptions={{
+                  personal: personalWorkspace
+                    ? {
+                        id: personalWorkspace.id,
+                        label: "Personal",
+                        workspaceType: "private",
+                      }
+                    : null,
+                  shared: sharedWorkspace
+                    ? {
+                        id: sharedWorkspace.id,
+                        label: "Shared",
+                        workspaceType: "shared",
+                      }
+                    : null,
+                }}
+                items={searchItems}
+                onCreatePage={async ({ title, workspaceId, workspaceType }) => {
+                  await handleCreatePage({
+                    workspaceId,
+                    parentPageId: null,
+                    title,
+                    workspaceType,
+                  });
+                }}
+                onNavigate={navigateToHref}
+                selectedPageId={selectedPageId}
+              />
+            </div>
           </div>
-        </div> */}
-        <div className="border-b border-stone-200 px-3 py-3">
+        ) : (
+          <>
+            <div className="border-b border-stone-200 px-3 py-3">
           <CommandPalette
             currentWorkspaceOptions={{
               personal: personalWorkspace
@@ -611,6 +650,11 @@ export function AppSidebar({
                               onRename={handleRenamePage}
                               onStartRename={(pageId) => setEditingPageId(pageId)}
                               onStopRename={() => setEditingPageId(null)}
+                              onNavigate={() => {
+                                if (collapsed) {
+                                  setIsFloatingOpen(false);
+                                }
+                              }}
                               pageHref={pageHref}
                               editingPageId={editingPageId}
                               personalWorkspaceId={personalWorkspace?.id ?? null}
@@ -662,6 +706,11 @@ export function AppSidebar({
                     : " hover:bg-stone-100",
                 )}
                 href="/recent"
+                onClick={() => {
+                  if (collapsed) {
+                    setIsFloatingOpen(false);
+                  }
+                }}
               >
                 <History
                   className={cn(
@@ -807,7 +856,10 @@ export function AppSidebar({
             </Button>
           </DialogActions>
         </SimpleDialog>
+          </>
+        )}
       </aside>
+    </div>
   );
 }
 
@@ -826,6 +878,7 @@ function SidebarPageNode({
   onRename,
   onStartRename,
   onStopRename,
+  onNavigate,
   pageHref,
   personalWorkspaceId,
   selectedPageId,
@@ -852,6 +905,7 @@ function SidebarPageNode({
   onRename: (node: VisiblePageNode, nextTitle: string) => Promise<void>;
   onStartRename: (pageId: string) => void;
   onStopRename: () => void;
+  onNavigate: () => void;
   pageHref: (pageId: string) => string;
   personalWorkspaceId: string | null;
   selectedPageId: string | null;
@@ -1095,6 +1149,7 @@ function SidebarPageNode({
               <Link
                 className="min-w-0 flex-1 overflow-hidden py-2 text-sm"
                 href={pageHref(node.id)}
+                onClick={onNavigate}
                 prefetch
               >
                 <span className="block max-w-36 truncate whitespace-nowrap">
@@ -1148,6 +1203,7 @@ function SidebarPageNode({
               onRename={onRename}
               onStartRename={onStartRename}
               onStopRename={onStopRename}
+              onNavigate={onNavigate}
               pageHref={pageHref}
               editingPageId={editingPageId}
               personalWorkspaceId={personalWorkspaceId}

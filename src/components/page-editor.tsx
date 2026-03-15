@@ -55,7 +55,7 @@ export function PageEditor({
 
   return (
     <EditorContextProvider value={{ internalLinkTargets, mentionUsers }}>
-      <div className="min-h-0 flex flex-1 flex-col">
+      <div className="min-h-0 flex flex-1 flex-col overflow-hidden">
         <PlateEditor
           editor={editor}
           exportFilename={sanitizeFilename(title)}

@@ -20,6 +20,7 @@ export type CommandPalettePageItem = {
 };
 
 type CommandPaletteProps = {
+  compact?: boolean;
   currentWorkspaceOptions: {
     personal: {
       id: string;
@@ -43,6 +44,7 @@ type CommandPaletteProps = {
 };
 
 export function CommandPalette({
+  compact = false,
   currentWorkspaceOptions,
   items,
   onCreatePage,
@@ -217,23 +219,36 @@ export function CommandPalette({
 
   return (
     <>
-      <Button
-        className="w-full justify-between "
-        onClick={() => setOpen(true)}
-        size="default"
-        type="button"
-        variant="secondary"
-      >
-        <span className="flex items-center gap-2 text-stone-400">
+      {compact ? (
+        <Button
+          aria-label="Search pages"
+          className="h-10 w-10 text-stone-400"
+          onClick={() => setOpen(true)}
+          size="icon"
+          type="button"
+          variant="ghost"
+        >
           <Search className="h-4 w-4" />
-          Search
-        </span>
-        <span className="rounded-sm bg-stone-200 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-stone-500">
-          {typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac")
-            ? "⌘K"
-            : "Ctrl+K"}
-        </span>
-      </Button>
+        </Button>
+      ) : (
+        <Button
+          className="w-full justify-between "
+          onClick={() => setOpen(true)}
+          size="default"
+          type="button"
+          variant="secondary"
+        >
+          <span className="flex items-center gap-2 text-stone-400">
+            <Search className="h-4 w-4" />
+            Search
+          </span>
+          <span className="rounded-sm bg-stone-200 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-stone-500">
+            {typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac")
+              ? "⌘K"
+              : "Ctrl+K"}
+          </span>
+        </Button>
+      )}
 
       {open ? (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-stone-950/20 px-4 pt-[12vh] backdrop-blur-sm">

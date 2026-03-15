@@ -54,8 +54,8 @@ const editorVariants = cva(
       },
       variant: {
         default:
-          "size-full px-16 pt-4 pb-72 text-base sm:px-[max(64px,calc(50%-350px))]",
-        fullWidth: "size-full px-16 pt-4 pb-72 text-base sm:px-24",
+          "size-full px-6 pt-4 pb-72 text-base sm:px-[max(24px,calc(50%-350px))]",
+        fullWidth: "size-full px-6 pt-4 pb-72 text-base sm:px-24",
       },
     },
   },

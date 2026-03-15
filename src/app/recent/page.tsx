@@ -1,9 +1,11 @@
 import { AppDndProvider } from "@/components/app-dnd-provider";
+import { AgentRail } from "@/components/agent-rail";
 import { TreePalm } from "lucide-react";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { RecentView } from "@/components/recent-view";
 import { UserSwitcher } from "@/components/user-switcher";
+import { getAgentThread } from "@/lib/agent";
 import { flatten, getKnowledgeBaseView } from "@/lib/knowledge-base";
 import { getImpersonatedUserId } from "@/lib/impersonation";
 
@@ -21,6 +23,8 @@ export default async function RecentPage() {
   if (!currentUser) {
     throw new Error("No users are available for impersonation.");
   }
+
+  const agentThread = await getAgentThread({ actingUserId: currentUser.id });
 
   const searchItems = visibleWorkspaces.flatMap(({ workspace, pages }) =>
     flatten(pages).map((page) => ({
@@ -52,22 +56,25 @@ export default async function RecentPage() {
           </div>
         </header>
 
-        <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)]">
-          <AppSidebar
-            currentUser={{
-              id: currentUser.id,
-              name: currentUser.name,
-              permissionLevel: currentUser.permissionLevel,
-              userType: currentUser.userType,
-            }}
-            searchItems={searchItems}
-            selectedPageId={null}
-            visibleWorkspaces={visibleWorkspaces}
-          />
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_400px] overflow-hidden">
+          <div className="grid min-h-0 min-w-0 grid-cols-[280px_minmax(0,1fr)] overflow-hidden">
+            <AppSidebar
+              currentUser={{
+                id: currentUser.id,
+                name: currentUser.name,
+                permissionLevel: currentUser.permissionLevel,
+                userType: currentUser.userType,
+              }}
+              searchItems={searchItems}
+              selectedPageId={null}
+              visibleWorkspaces={visibleWorkspaces}
+            />
 
-          <div className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#fbfaf7]">
-            <RecentView recentActivity={recentActivity} />
+            <div className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#fbfaf7]">
+              <RecentView recentActivity={recentActivity} />
+            </div>
           </div>
+          <AgentRail initialThread={agentThread} selectedPageAttachment={null} />
         </div>
       </AppDndProvider>
     </main>

@@ -24,6 +24,22 @@ export const pageActivityEventTypeEnum = pgEnum("page_activity_event_type", [
   "page_moved",
   "page_deleted",
 ]);
+export const agentMessageRoleEnum = pgEnum("agent_message_role", ["user", "assistant"]);
+export const agentAttachmentEntityTypeEnum = pgEnum("agent_attachment_entity_type", ["page"]);
+export const agentActionTypeEnum = pgEnum("agent_action_type", [
+  "apply_page_patch",
+  "discard_page_patch",
+]);
+export const agentActionStatusEnum = pgEnum("agent_action_status", [
+  "pending",
+  "completed",
+  "dismissed",
+]);
+export const agentPatchProposalStatusEnum = pgEnum("agent_patch_proposal_status", [
+  "pending",
+  "applied",
+  "discarded",
+]);
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -187,9 +203,148 @@ export const pageActivityEvents = pgTable(
   ],
 );
 
+export const agentThreads = pgTable(
+  "agent_threads",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    agentKey: text("agent_key").notNull(),
+    title: text("title").notNull(),
+    isDefault: integer("is_default").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("agent_threads_user_id_idx").on(table.userId),
+    uniqueIndex("agent_threads_user_agent_default_idx").on(
+      table.userId,
+      table.agentKey,
+      table.isDefault,
+    ),
+  ],
+);
+
+export const agentMessages = pgTable(
+  "agent_messages",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => agentThreads.id, { onDelete: "cascade" }),
+    role: agentMessageRoleEnum("role").notNull(),
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("agent_messages_thread_id_idx").on(table.threadId),
+    index("agent_messages_created_at_idx").on(table.createdAt),
+  ],
+);
+
+export const agentMessageAttachments = pgTable(
+  "agent_message_attachments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    messageId: uuid("message_id")
+      .notNull()
+      .references(() => agentMessages.id, { onDelete: "cascade" }),
+    entityType: agentAttachmentEntityTypeEnum("entity_type").notNull(),
+    entityId: uuid("entity_id").notNull(),
+    label: text("label").notNull(),
+    href: text("href"),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (table) => [
+    index("agent_message_attachments_message_id_idx").on(table.messageId),
+  ],
+);
+
+export const agentMessageCitations = pgTable(
+  "agent_message_citations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    messageId: uuid("message_id")
+      .notNull()
+      .references(() => agentMessages.id, { onDelete: "cascade" }),
+    pageId: uuid("page_id")
+      .notNull()
+      .references(() => pages.id, { onDelete: "cascade" }),
+    pageTitle: text("page_title").notNull(),
+    href: text("href").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (table) => [
+    index("agent_message_citations_message_id_idx").on(table.messageId),
+    index("agent_message_citations_page_id_idx").on(table.pageId),
+  ],
+);
+
+export const agentPatchProposals = pgTable(
+  "agent_patch_proposals",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    assistantMessageId: uuid("assistant_message_id")
+      .notNull()
+      .references(() => agentMessages.id, { onDelete: "cascade" }),
+    targetPageId: uuid("target_page_id")
+      .notNull()
+      .references(() => pages.id, { onDelete: "cascade" }),
+    baseRevisionId: uuid("base_revision_id")
+      .notNull()
+      .references(() => pageRevisions.id, { onDelete: "restrict" }),
+    proposedTitle: text("proposed_title").notNull(),
+    proposedContentMarkdown: text("proposed_content_markdown").notNull(),
+    rationale: text("rationale").notNull(),
+    status: agentPatchProposalStatusEnum("status").notNull().default("pending"),
+    appliedRevisionId: uuid("applied_revision_id").references(() => pageRevisions.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("agent_patch_proposals_assistant_message_id_idx").on(table.assistantMessageId),
+    index("agent_patch_proposals_target_page_id_idx").on(table.targetPageId),
+  ],
+);
+
+export const agentActions = pgTable(
+  "agent_actions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    messageId: uuid("message_id")
+      .notNull()
+      .references(() => agentMessages.id, { onDelete: "cascade" }),
+    actionType: agentActionTypeEnum("action_type").notNull(),
+    label: text("label").notNull(),
+    payload: jsonb("payload").notNull(),
+    status: agentActionStatusEnum("status").notNull().default("pending"),
+    targetEntityType: agentAttachmentEntityTypeEnum("target_entity_type"),
+    targetEntityId: uuid("target_entity_id"),
+    actedByUserId: uuid("acted_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    outcomeMessage: text("outcome_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("agent_actions_message_id_idx").on(table.messageId),
+    index("agent_actions_status_idx").on(table.status),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type Workspace = typeof workspaces.$inferSelect;
 export type Page = typeof pages.$inferSelect;
 export type PageRevision = typeof pageRevisions.$inferSelect;
 export type PageEditSession = typeof pageEditSessions.$inferSelect;
 export type PageActivityEvent = typeof pageActivityEvents.$inferSelect;
+export type AgentThread = typeof agentThreads.$inferSelect;
+export type AgentMessage = typeof agentMessages.$inferSelect;
+export type AgentMessageAttachment = typeof agentMessageAttachments.$inferSelect;
+export type AgentMessageCitation = typeof agentMessageCitations.$inferSelect;
+export type AgentPatchProposal = typeof agentPatchProposals.$inferSelect;
+export type AgentAction = typeof agentActions.$inferSelect;

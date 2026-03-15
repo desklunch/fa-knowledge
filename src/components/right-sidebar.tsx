@@ -91,9 +91,9 @@ export function RightSidebar({
   };
 
   return (
-    <aside className="h-full min-h-0 overflow-y-auto bg-[#f7f5ef]">
+    <aside className="flex h-full min-h-0 flex-col overflow-y-auto bg-[#f7f5ef]">
       {selectedPage && selectedRevision ? (
-        <div>
+        <div className="min-h-0">
           <SidebarPanel title="Page overview">
             <div className="grid gap-2 text-sm text-stone-600">
               <InlineMetric label="Title" value={selectedDraft?.title ?? selectedPage.title} />
