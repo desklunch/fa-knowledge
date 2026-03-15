@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 import { PageEditor } from "@/components/page-editor";
-import { RightSidebarToggleButton } from "@/components/right-sidebar-layout";
+import {
+  RightSidebarLayout,
+  RightSidebarToggleButton,
+} from "@/components/right-sidebar-layout";
 
 type SaveState = "saved" | "saving" | "unsaved" | "error";
 
@@ -24,6 +27,7 @@ type EditablePageFormProps = {
     name: string;
   }>;
   pageId: string;
+  rightSidebar: ReactNode;
 };
 
 export function EditablePageForm({
@@ -34,6 +38,7 @@ export function EditablePageForm({
   internalLinkTargets,
   mentionUsers,
   pageId,
+  rightSidebar,
 }: EditablePageFormProps) {
   const router = useRouter();
   const [editorSessionId] = useState(() => crypto.randomUUID());
@@ -198,6 +203,38 @@ export function EditablePageForm({
     [],
   );
 
+  const header = (
+    <section className="border-b border-stone-200 bg-white p-3">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <input
+            name="title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Untitled"
+            className="w-full border-0 bg-transparent p-0 text-xl font-semibold tracking-tight text-stone-950 outline-none placeholder:text-stone-400"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="shrink-0 rounded-full bg-stone-100 px-3 py-1 text-[10px] font-medium text-stone-600">
+            {getSaveStatusLabel(saveState, lastSavedAt)}
+          </div>
+          <button
+            type="submit"
+            disabled={saveState === "saving" || !isDirty}
+            className="shrink-0 rounded-full bg-stone-900 px-3 py-1 text-[10px] font-medium text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
+          >
+            Save version
+          </button>
+          <RightSidebarToggleButton />
+        </div>
+      </div>
+      {saveState === "error" ? (
+        <p className="text-xs text-red-700">{saveError ?? "Saving failed."}</p>
+      ) : null}
+    </section>
+  );
+
   return (
     <form
       className="relative flex h-full min-h-0 flex-col"
@@ -206,44 +243,16 @@ export function EditablePageForm({
         void persistDraft("manual");
       }}
     >
-      <section className="shrink-0 border-b border-stone-200 bg-white p-3">
-        <div className="flex items-center justify-between gap-4">
-          <div className="min-w-0 flex-1">
-            <input
-              name="title"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="Untitled"
-              className="w-full border-0 bg-transparent p-0 text-xl font-semibold tracking-tight text-stone-950 outline-none placeholder:text-stone-400"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="shrink-0 rounded-full bg-stone-100 px-3 py-1 text-[10px] font-medium text-stone-600">
-              {getSaveStatusLabel(saveState, lastSavedAt)}
-            </div>
-            <button
-              type="submit"
-              disabled={saveState === "saving" || !isDirty}
-              className="shrink-0 rounded-full bg-stone-900 px-3 py-1 text-[10px] font-medium text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300"
-            >
-              Save version
-            </button>
-            <RightSidebarToggleButton />
-          </div>
-        </div>
-        {saveState === "error" ? (
-          <p className="text-xs text-red-700">{saveError ?? "Saving failed."}</p>
-        ) : null}
-      </section>
-
-      <PageEditor
-        initialEditorDocJson={initialEditorDocJson}
-        internalLinkTargets={internalLinkTargets}
-        mentionUsers={mentionUsers}
-        initialMarkdown={initialMarkdown}
-        onChange={handleEditorChange}
-        title={title}
-      />
+      <RightSidebarLayout header={header} rightSidebar={rightSidebar}>
+        <PageEditor
+          initialEditorDocJson={initialEditorDocJson}
+          internalLinkTargets={internalLinkTargets}
+          mentionUsers={mentionUsers}
+          initialMarkdown={initialMarkdown}
+          onChange={handleEditorChange}
+          title={title}
+        />
+      </RightSidebarLayout>
     </form>
   );
 }

@@ -22,9 +22,11 @@ type RightSidebarLayoutContextValue = {
 const RightSidebarLayoutContext = createContext<RightSidebarLayoutContextValue | null>(null);
 
 export function RightSidebarLayout({
+  header,
   children,
   rightSidebar,
 }: {
+  header?: ReactNode;
   children: ReactNode;
   rightSidebar: ReactNode;
 }) {
@@ -54,22 +56,27 @@ export function RightSidebarLayout({
 
   return (
     <RightSidebarLayoutContext.Provider value={value}>
-      <div
-        className={cn(
-          "grid h-full min-h-0 min-w-0 transition-[grid-template-columns]",
-          collapsed
-            ? "grid-cols-[minmax(0,1fr)_0px]"
-            : "grid-cols-[minmax(0,1fr)_320px]",
-        )}
-      >
-        <div className="flex min-h-0 min-w-0 flex-col">{children}</div>
+      <div className="flex h-full min-h-0 min-w-0 flex-col">
+        {header ? <div className="shrink-0">{header}</div> : null}
         <div
           className={cn(
-            "h-full min-h-0 min-w-0 transition-[width,opacity]",
-            collapsed ? "w-0 overflow-hidden border-l-0 opacity-0" : "w-[320px] border-l border-stone-200 opacity-100",
+            "grid min-h-0 min-w-0 flex-1 transition-[grid-template-columns]",
+            collapsed
+              ? "grid-cols-[minmax(0,1fr)_0px]"
+              : "grid-cols-[minmax(0,1fr)_320px]",
           )}
         >
-          {rightSidebar}
+          <div className="flex min-h-0 min-w-0 flex-col">{children}</div>
+          <div
+            className={cn(
+              "h-full min-h-0 min-w-0 transition-[width,opacity]",
+              collapsed
+                ? "w-0 overflow-hidden border-l-0 opacity-0"
+                : "w-[320px] border-l border-stone-200 opacity-100",
+            )}
+          >
+            {rightSidebar}
+          </div>
         </div>
       </div>
     </RightSidebarLayoutContext.Provider>

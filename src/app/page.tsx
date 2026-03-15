@@ -71,6 +71,24 @@ export default async function Home({ searchParams }: HomeProps) {
       workspaceType: workspace.type,
     })),
   );
+  const rightSidebar = (
+    <RightSidebar
+      availableUsers={availableUsers.map((user) => ({ id: user.id, name: user.name }))}
+      currentWorkspaceType={currentWorkspace?.type ?? "shared"}
+      selectedPageBacklinks={selectedPageBacklinks}
+      selectedDraft={
+        selectedDraft
+          ? {
+              contentMarkdown: selectedDraft.contentMarkdown,
+              title: selectedDraft.title,
+            }
+          : null
+      }
+      selectedPage={selectedPage}
+      selectedPageRevisions={selectedPageRevisions}
+      selectedRevision={selectedRevision}
+    />
+  );
 
   return (
     <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#f3f1ea] text-stone-900">
@@ -111,26 +129,7 @@ export default async function Home({ searchParams }: HomeProps) {
             selectedPageId={selectedPage?.id ?? null}
             visibleWorkspaces={visibleWorkspaces}
           />
-          <RightSidebarLayout
-            rightSidebar={
-              <RightSidebar
-                availableUsers={availableUsers.map((user) => ({ id: user.id, name: user.name }))}
-                currentWorkspaceType={currentWorkspace?.type ?? "shared"}
-                selectedPageBacklinks={selectedPageBacklinks}
-                selectedDraft={
-                  selectedDraft
-                    ? {
-                        contentMarkdown: selectedDraft.contentMarkdown,
-                        title: selectedDraft.title,
-                      }
-                    : null
-                }
-                selectedPage={selectedPage}
-                selectedPageRevisions={selectedPageRevisions}
-                selectedRevision={selectedRevision}
-              />
-            }
-          >
+          <div className="min-h-0 min-w-0">
             <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#fbfaf7]">
               {selectedPage && selectedRevision ? (
                 <>
@@ -161,20 +160,25 @@ export default async function Home({ searchParams }: HomeProps) {
                         initialMarkdown={
                           selectedDraft?.contentMarkdown ?? selectedRevision.contentMarkdown
                         }
+                        rightSidebar={rightSidebar}
                       />
                     ) : (
-                      <article className="mx-auto m-4 flex h-full min-h-0 max-w-4xl flex-col overflow-hidden rounded-lg border border-stone-200 bg-white shadow-sm">
-                        <div className="shrink-0 border-b border-stone-200 px-6 py-4">
-                          <div className="flex flex-wrap items-center justify-between gap-4">
-                            <div className="min-w-0 flex-1">
-                              <h2 className="truncate text-2xl font-semibold tracking-tight text-stone-950">
-                                {selectedPage.title}
-                              </h2>
+                      <RightSidebarLayout
+                        header={
+                          <div className="border-b border-stone-200 bg-white px-6 py-4">
+                            <div className="flex flex-wrap items-center justify-between gap-4">
+                              <div className="min-w-0 flex-1">
+                                <h2 className="truncate text-2xl font-semibold tracking-tight text-stone-950">
+                                  {selectedPage.title}
+                                </h2>
+                              </div>
+                              <RightSidebarToggleButton />
                             </div>
-                            <RightSidebarToggleButton />
                           </div>
-                        </div>
-                        <div className="min-h-0 flex-1 overflow-y-auto px-8 py-8">
+                        }
+                        rightSidebar={rightSidebar}
+                      >
+                        <article className="min-h-0 flex-1 overflow-y-auto px-8 py-8">
                           <div className="mx-auto max-w-3xl">
                             <ReactMarkdown
                               remarkPlugins={[remarkGfm]}
@@ -306,8 +310,8 @@ export default async function Home({ searchParams }: HomeProps) {
                               {selectedRevision.contentMarkdown}
                             </ReactMarkdown>
                           </div>
-                        </div>
-                      </article>
+                        </article>
+                      </RightSidebarLayout>
                     )}
                   </div>
                 </>
@@ -328,7 +332,7 @@ export default async function Home({ searchParams }: HomeProps) {
                 </div>
               )}
             </section>
-          </RightSidebarLayout>
+          </div>
         </div>
       </AppDndProvider>
     </main>
